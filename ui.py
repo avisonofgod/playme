@@ -1,15 +1,18 @@
 import tkinter as tk
 import math
+import logging
 
+logger = logging.getLogger(__name__)
 
 class UI:
     def __init__(self, player):
         self.player = player
         self.player.on_play = self.on_play
         self.player.on_error = self.on_error
+        self.player.on_queue_update = self.on_queue_update
 
         self.root = tk.Tk()
-        self.root.title("Playbin")
+        self.root.title("PlayMe - Audio Player")
 
         # ---------- DISC ----------
         self.canvas = tk.Canvas(self.root, width=150, height=150, bg="black")
@@ -35,13 +38,14 @@ class UI:
         self.entry.bind("<space>", lambda e: self.toggle_pause())
 
         # ---------- STATUS ----------
-        self.status = tk.Label(self.root, text="Ready", fg="gray", font=("Arial", 9))
+        self.status = tk.Label(self.root, text="Ready - Audio Only", fg="gray", font=("Arial", 9))
         self.status.pack()
 
-        # ---------- HISTORY ----------
-        self.history_list = tk.Listbox(self.root, height=5, width=50)
-        self.history_list.pack(pady=5)
-        self.history_list.bind("<Double-Button-1>", self.on_history_select)
+        # ---------- QUEUE (similar music results) ----------
+        tk.Label(self.root, text="Queue (similar music):").pack()
+        self.queue_list = tk.Listbox(self.root, height=6, width=50)
+        self.queue_list.pack(pady=5)
+        self.queue_list.bind("<Double-Button-1>", self.on_queue_select)
 
         # ---------- QUALITY ----------
         self.quality_var = tk.StringVar(value="best")
@@ -60,11 +64,7 @@ class UI:
         tk.Button(self.controls, text="Play", command=self.play).pack(side="left")
         tk.Button(self.controls, text="Stop", command=self.stop).pack(side="left")
         tk.Button(self.controls, text="Pause", command=self.toggle_pause).pack(side="left")
-        tk.Button(self.controls, text="Video", command=self.toggle_video).pack(side="left")
-
-        self.indicator = tk.Canvas(self.controls, width=20, height=20, highlightthickness=0)
-        self.indicator.pack(side="left")
-        self.light = self.indicator.create_oval(5, 5, 15, 15, fill="red")
+        tk.Button(self.controls, text="Next", command=self.play_next).pack(side="left")
 
         self.animate_disc()
 
@@ -72,7 +72,7 @@ class UI:
 
     # ---------- ENERGY ----------
     def update_energy(self):
-        target = 1.0 if (self.player.is_playing() and not self.player.is_paused()) else 0.0
+        target = 1.0 if (self.player.playing and not self.player.paused) else 0.0
         self.energy = 0.85 * self.energy + 0.15 * target
 
     # ---------- ANIMATION ----------
@@ -110,70 +110,77 @@ class UI:
     # ---------- CALLBACKS ----------
     def on_play(self):
         self.status.config(text="Playing", fg="green")
-        self.update_history()
+        logger.info("Playback started successfully")
+        self.update_queue_display()
 
     def on_error(self, msg):
-        self.status.config(text=f"Error: {msg}", fg="red")
+        self.status.config(text="Error: " + msg, fg="red")
+        logger.error("UI Error: " + msg)
         self.entry.config(bg="pink")
         self.root.after(1000, lambda: self.entry.config(bg="white"))
 
-    # ---------- HISTORY ----------
-    def update_history(self):
-        self.history_list.delete(0, tk.END)
-        for item in self.player.get_history()[::-1]:
-            self.history_list.insert(tk.END, item)
+    def on_queue_update(self):
+        self.update_queue_display()
 
-    def on_history_select(self, event):
-        selection = self.history_list.curselection()
+    # ---------- QUEUE ----------
+    def update_queue_display(self):
+        self.queue_list.delete(0, tk.END)
+        queue = self.player.get_queue()
+        for i, item in enumerate(queue):
+            prefix = "▶ " if i == self.player.current_index else "  "
+            self.queue_list.insert(tk.END, prefix + item)
+
+    def on_queue_select(self, event):
+        selection = self.queue_list.curselection()
         if selection:
-            query = self.history_list.get(selection)
-            self.entry.delete(0, tk.END)
-            self.entry.insert(0, query)
-            self.play()
+            idx = selection[0]
+            if idx < len(self.player.queue):
+                self.player.current_index = idx - 1
+                self.player.play_next()
 
     # ---------- QUALITY ----------
     def apply_quality(self):
         quality = self.quality_var.get()
         if quality == "best":
-            self.player.resolver.set_quality("bestaudio", "bestvideo+bestaudio")
+            self.player.resolver.set_quality("bestaudio")
         elif quality == "high":
-            self.player.resolver.set_quality("bestaudio[abr<=192]", "bestvideo[height<=1080]+bestaudio")
+            self.player.resolver.set_quality("bestaudio[abr<=192]")
         elif quality == "medium":
-            self.player.resolver.set_quality("bestaudio[abr<=128]", "bestvideo[height<=720]+bestaudio")
+            self.player.resolver.set_quality("bestaudio[abr<=128]")
         else:
-            self.player.resolver.set_quality("bestaudio[abr<=96]", "bestvideo[height<=480]+bestaudio")
+            self.player.resolver.set_quality("bestaudio[abr<=96]")
 
     # ---------- BUTTON ACTIONS ----------
     def play(self):
         query = self.entry.get().strip()
         if query:
+            logger.info("User searching for music: " + query)
             self.apply_quality()
             self.status.config(text="Searching...", fg="orange")
             self.player.play(query)
-            self.update_history()
+
+    def play_next(self):
+        logger.info("User pressed Next")
+        self.player.play_next()
 
     def stop(self):
+        logger.info("User pressed stop")
         self.player.stop()
         self.status.config(text="Stopped", fg="gray")
+        self.update_queue_display()
 
     def toggle_pause(self):
         self.player.toggle_pause()
-        if self.player.is_paused():
+        if self.player.paused:
             self.status.config(text="Paused", fg="yellow")
+            logger.info("Playback paused")
         else:
             self.status.config(text="Playing", fg="green")
-
-    def toggle_video(self):
-        self.player.toggle_video()
-        self.indicator.itemconfig(
-            self.light,
-            fill="green" if self.player.video_enabled() else "red"
-        )
-        mode = "Video" if self.player.video_enabled() else "Audio"
-        self.status.config(text=f"Mode: {mode}", fg="blue")
+            logger.info("Playback resumed")
 
     # ---------- CLOSE ----------
     def on_close(self):
+        logger.info("Application closing")
         self.player.stop()
         self.root.destroy()
 
