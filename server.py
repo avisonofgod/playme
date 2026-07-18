@@ -466,104 +466,64 @@ async function submitToken() {{
             self._send(*error_response("Error al guardar token"))
 
     def _handle_stream(self):
-        """Sirve el audio actual."""
+        """Sirve el audio actual.
+        
+        Prioridad:
+        1. Modo file: sirve archivo cache con Range support
+        2. Modo proxy: stream directo de Google con timeout de inactividad
+        """
         with player_lock:
             mode = player.current_mode
             stream_url = player.stream_url
             cache_path = player.cache_path
 
+        # MODO FILE: cache local (prioritario)
+        if mode == "file" and cache_path and os.path.exists(cache_path):
+            self._serve_cache_file(cache_path)
+            return
+
+        # MODO PROXY: stream directo (fallback)
         if mode == "proxy" and stream_url:
-            # Proxy directo a Google con Range forwarding
-            range_header = self.headers.get("Range", "")
+            self._proxy_stream(stream_url)
+            return
+
+        self._send(*error_response("No active stream", 404))
+
+    def _serve_cache_file(self, cache_path: str):
+        """Sirve archivo de cache con soporte Range (206 Partial Content)."""
+        file_size = os.path.getsize(cache_path)
+        range_header = self.headers.get("Range", "")
+        start = 0
+        end = file_size - 1
+
+        if range_header.startswith("bytes="):
+            ranges = range_header[6:].split("-")
             try:
-                req = urllib.request.Request(stream_url)
-                if range_header:
-                    req.add_header("Range", range_header)
-                resp = urllib.request.urlopen(req, timeout=10)
-                content_type = resp.headers.get("Content-Type", "audio/webm")
-                content_length = resp.headers.get("Content-Length")
-                content_range = resp.headers.get("Content-Range", "")
-                http_status = resp.status
+                start = int(ranges[0]) if ranges[0] else 0
+                if len(ranges) > 1 and ranges[1]:
+                    end = int(ranges[1])
+            except ValueError:
+                start = 0
 
-                # Pasar headers al cliente
-                if range_header and http_status == 206:
-                    self.send_response(206)
-                    if content_range:
-                        self.send_header("Content-Range", content_range)
-                else:
-                    self.send_response(200)
+        ext = os.path.splitext(cache_path)[1].lower()
+        ct = {"webm": "audio/webm", "mp3": "audio/mpeg"}.get(ext, "audio/webm")
 
-                self.send_header("Content-Type", content_type)
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Accept-Ranges", "bytes")
-                if content_length and not range_header:
-                    self.send_header("Content-Length", content_length)
-                self.end_headers()
+        if start > 0:
+            self.send_response(206)
+            self.send_header("Content-Range",
+                            f"bytes {start}-{end}/{file_size}")
+            content_length = end - start + 1
+        else:
+            self.send_response(200)
+            content_length = file_size
 
-                # Proxy directo desde la respuesta abierta (sin cerrar)
-                try:
-                    resp.fp._sock.settimeout(5) if hasattr(resp.fp, '_sock') else None
-                    while True:
-                        try:
-                            chunk = resp.read(65536)
-                        except socket.timeout:
-                            logger.debug("Stream read timeout, continuando")
-                            continue
-                        if not chunk:
-                            break
-                        try:
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
-                        except (BrokenPipeError, ConnectionResetError, OSError):
-                            logger.info("Client disconnected from stream")
-                            break
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    logger.info("Client disconnected from stream")
-                finally:
-                    resp.close()
-            except Exception as e:
-                logger.error(f"Proxy error: {e}")
-                try:
-                    self._send(*error_response("Stream failed", 502))
-                except Exception:
-                    pass
+        self.send_header("Content-Type", ct)
+        self.send_header("Content-Length", str(content_length))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
 
-        elif mode == "file" and cache_path and os.path.exists(cache_path):
-            # Servir archivo mp3 con Range support
-            file_size = os.path.getsize(cache_path)
-            range_header = self.headers.get("Range", "")
-            start = 0
-            end = file_size - 1
-
-            if range_header.startswith("bytes="):
-                ranges = range_header[6:].split("-")
-                try:
-                    start = int(ranges[0]) if ranges[0] else 0
-                    if len(ranges) > 1 and ranges[1]:
-                        end = int(ranges[1])
-                except ValueError:
-                    start = 0
-
-            # Determinar Content-Type por extensión
-            ext = os.path.splitext(cache_path)[1].lower()
-            ct = {"webm": "audio/webm", "mp3": "audio/mpeg"}.get(ext, "audio/webm")
-
-            if start > 0:
-                self.send_response(206)
-                self.send_header("Content-Range",
-                                f"bytes {start}-{end}/{file_size}")
-                content_length = end - start + 1
-            else:
-                self.send_response(200)
-                content_length = file_size
-
-            self.send_header("Content-Type", ct)
-            self.send_header("Content-Length", str(content_length))
-            self.send_header("Accept-Ranges", "bytes")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-
-            # Leer y enviar el rango
+        try:
             with open(cache_path, "rb") as f:
                 f.seek(start)
                 remaining = content_length
@@ -572,13 +532,78 @@ async function submitToken() {{
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            logger.info("Client disconnected (file stream)")
+
+    def _proxy_stream(self, stream_url: str):
+        """Proxy directo de Google con timeout de inactividad de 30s.
+        
+        Si el cliente deja de recibir datos por 30s, el stream se corta
+        automáticamente para no dejar hilos colgados.
+        """
+        import select
+
+        range_header = self.headers.get("Range", "")
+        try:
+            req = urllib.request.Request(stream_url)
+            if range_header:
+                req.add_header("Range", range_header)
+            resp = urllib.request.urlopen(req, timeout=10)
+            content_type = resp.headers.get("Content-Type", "audio/webm")
+            content_length = resp.headers.get("Content-Length")
+            content_range = resp.headers.get("Content-Range", "")
+            http_status = resp.status
+
+            if range_header and http_status == 206:
+                self.send_response(206)
+                if content_range:
+                    self.send_header("Content-Range", content_range)
+            else:
+                self.send_response(200)
+
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Accept-Ranges", "bytes")
+            if content_length and not range_header:
+                self.send_header("Content-Length", content_length)
+            self.end_headers()
+
+            # Proxy con timeout de inactividad
+            IDLE_TIMEOUT = 30  # segundos sin datos
+            last_data = time.time()
+
+            try:
+                while True:
+                    # select con timeout para detectar inactividad
+                    r, _, _ = select.select([resp.fp], [], [], IDLE_TIMEOUT)
+                    if not r:
+                        # No hubo datos en IDLE_TIMEOUT segundos
+                        logger.info(f"Stream idle timeout ({IDLE_TIMEOUT}s)")
+                        break
+
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+
+                    last_data = time.time()
                     try:
                         self.wfile.write(chunk)
-                    except (BrokenPipeError, ConnectionResetError):
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        logger.info("Client disconnected from stream")
                         break
-                    remaining -= len(chunk)
-        else:
-            self._send(*error_response("No active stream", 404))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                logger.info("Client disconnected from stream")
+            finally:
+                resp.close()
+        except Exception as e:
+            logger.error(f"Proxy error: {e}")
+            try:
+                self._send(*error_response("Stream failed", 502))
+            except Exception:
+                pass
 
     # ── POST ─────────────────────────────────────────────
 

@@ -1,25 +1,33 @@
 """
 PlayMe - Player
-Gestiona cola de reproducción, estado, y coordina resolver + transcoder.
+Gestiona cola de reproduccion, estado, y coordina resolver + transcoder.
+Flujo hibrido:
+  1. Responde inmediato: modo proxy (yt-dlp --get-url)
+  2. Background: descarga a cache con yt-dlp directo
+  3. Proximo play usa cache si existe
+El player_lock solo protege estado, no bloquea durante descargas.
 """
 import logging
 import os
+import subprocess
 import threading
 import time
 
 logger = logging.getLogger(__name__)
+
+CACHE_DIR = "/tmp/playme_cache"
+
 
 class Player:
     def __init__(self, resolver, transcoder):
         self.resolver = resolver
         self.transcoder = transcoder
 
-        # Estado
-        self.queue = []          # [{id, title, duration, uploader}]
+        self.queue = []
         self.current_index = -1
         self.playing = False
         self.paused = False
-        self.current_mode = None  # "proxy" | "file" | "pipe"
+        self.current_mode = None  # "proxy" | "file"
         self.stream_url = None
         self.cache_path = None
         self.current_info = None
@@ -31,20 +39,64 @@ class Player:
         self._on_state_change = callback
 
     def search(self, query: str, limit: int = 10):
-        """Busca canciones."""
         return self.resolver.search(query, limit)
 
+    def _download_cache_bg(self, video_id: str):
+        """Descarga a cache en thread separado. No bloquea el play."""
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        cache_path = os.path.join(CACHE_DIR, f"{video_id}.webm")
+
+        if os.path.isfile(cache_path) and os.path.getsize(cache_path) > 0:
+            logger.info(f"Cache ya existe: {cache_path}")
+            return cache_path
+
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        logger.info(f"Background cache de {video_id}")
+
+        args = self.resolver._base_args() + [
+            "--format", "bestaudio[ext=webm]/bestaudio",
+            "--output", cache_path,
+            "--no-part",
+            "--no-mtime",
+            url
+        ]
+
+        try:
+            result = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=180
+            )
+            if result.returncode == 0 and os.path.isfile(cache_path) and os.path.getsize(cache_path) > 0:
+                size = os.path.getsize(cache_path)
+                logger.info(f"Cache OK: {cache_path} ({size} bytes)")
+                return cache_path
+            else:
+                logger.warning(f"Cache download failed: {result.stderr[:200]}")
+                return None
+        except subprocess.TimeoutExpired:
+            logger.error("Cache download timeout")
+            return None
+        except Exception as e:
+            logger.error(f"Cache download error: {e}")
+            return None
+
     def play(self, video_id: str):
-        """Reproduce un video por ID."""
+        """Reproduce un video por ID.
+        
+        Flujo:
+        1. Si existe en cache -> modo file (instantaneo)
+        2. Si no -> modo proxy (yt-dlp --get-url, rapido)
+           + background download a cache
+        """
         with self._lock:
-            # Obtener info del video (fallback a info mínima si falla)
             info = self.resolver.get_info(video_id)
             if not info:
-                logger.warning(f"No info for {video_id}, usando info mínima")
+                logger.warning(f"No info for {video_id}")
                 info = {"id": video_id, "title": f"YouTube {video_id}",
                         "duration": 0, "uploader": ""}
 
-            # Detener lo que sea que esté sonando
             self.transcoder.stop()
             self.playing = False
             self.paused = False
@@ -52,57 +104,39 @@ class Player:
             self.stream_url = None
             self.cache_path = None
 
-            title = info.get("title", "Sin título")
+            title = info.get("title", "Sin titulo")
             duration = info.get("duration", 0)
             uploader = info.get("uploader", "")
-            youtube_url = f"https://www.youtube.com/watch?v={video_id}"
             self.current_info = info
 
             logger.info(f"Play: {title} ({video_id})")
 
-            # ESTRATEGIA 1: ¿Ya está en cache?
-            if self.transcoder.is_cached(video_id):
-                self.cache_path = self.transcoder._get_cache_path(video_id)
+            # 1) Cache existente?
+            cache_path = os.path.join(CACHE_DIR, f"{video_id}.webm")
+            if os.path.isfile(cache_path) and os.path.getsize(cache_path) > 0:
+                self.cache_path = cache_path
                 self.current_mode = "file"
                 self.playing = True
-                logger.info(f"Modo file (cache): {self.cache_path}")
+                logger.info(f"Modo file desde cache: {cache_path}")
             else:
-                # Si get_info no dio título real (falló), probablemente 
-                # el video está bloqueado. Intentar proxy rápido.
-                if not uploader and duration == 0:
-                    logger.warning("Video parece bloqueado, intento rápido")
-                    stream_url = None
-                    try:
-                        stream_url = self.resolver.get_stream_url(video_id)
-                    except Exception:
-                        pass
-                else:
-                    # ESTRATEGIA 2: Intentar stream directo (proxy)
-                    stream_url = self.resolver.get_stream_url(video_id)
+                # 2) Proxy streaming (rapido, responde en segundos)
+                stream_url = self.resolver.get_stream_url(video_id)
                 if stream_url:
                     self.stream_url = stream_url
                     self.current_mode = "proxy"
                     self.playing = True
                     logger.info("Modo proxy (stream directo)")
 
-                    # En background: descargar a cache para futuras veces
-                    def cache_background():
-                        logger.info(f"Background cache de {video_id}")
-                        self.transcoder.start_file(video_id, youtube_url)
-                    threading.Thread(target=cache_background, daemon=True).start()
+                    # Background: descargar a cache para proxima vez
+                    t = threading.Thread(
+                        target=self._download_cache_bg,
+                        args=(video_id,),
+                        daemon=True
+                    )
+                    t.start()
                 else:
-                    # ESTRATEGIA 3: mpv transcode completo a cache
-                    logger.info("Modo file (mpv transcode a cache)")
-                    cache_path = self.transcoder.start_file(
-                        video_id, youtube_url)
-                    if cache_path:
-                        self.cache_path = cache_path
-                        self.current_mode = "file"
-                        self.playing = True
-                        logger.info(f"Modo file OK: {cache_path}")
-                    else:
-                        logger.error("No se pudo iniciar reproducción")
-                        return False
+                    logger.error("No se pudo obtener stream URL")
+                    return False
 
             # Actualizar cola
             track = {
@@ -115,7 +149,6 @@ class Player:
                 self.queue = [track]
                 self.current_index = 0
             else:
-                # Insertar como siguiente
                 self.queue.insert(self.current_index + 1, track)
                 self.current_index += 1
 
@@ -123,7 +156,6 @@ class Player:
             return True
 
     def play_next(self):
-        """Siguiente en cola."""
         with self._lock:
             if self.current_index < len(self.queue) - 1:
                 self.current_index += 1
@@ -133,12 +165,9 @@ class Player:
                 logger.info("No more in queue")
                 self.stop()
                 return False
-
-        # Reproducir fuera del lock
         return self.play(self.queue[self.current_index]["id"])
 
     def play_prev(self):
-        """Anterior en cola."""
         with self._lock:
             if self.current_index > 0:
                 self.current_index -= 1
@@ -150,19 +179,8 @@ class Player:
         return self.play(self.queue[self.current_index]["id"])
 
     def toggle_pause(self):
-        # Pause solo tiene sentido en modo file (mpv activo reproduciendo)
-        # En modo proxy, el stream viene de Google y no podemos pausarlo
-        if self.current_mode == "file" and self.playing:
-            if not self.paused:
-                self.paused = True
-                logger.info("Paused (file mode)")
-            else:
-                self.paused = False
-                logger.info("Resumed (file mode)")
-        elif self.current_mode == "proxy":
-            # En proxy no hay pause real, simulamos
-            self.paused = not self.paused
-            logger.info(f"Pause state: {self.paused} (proxy - no op)")
+        self.paused = not self.paused
+        logger.info(f"Pause state: {self.paused}")
         self._notify_state()
         return self.paused
 
@@ -181,12 +199,11 @@ class Player:
         self._notify_state()
 
     def add_to_queue(self, video_id: str):
-        """Añade a la cola (no reproduce)."""
         info = self.resolver.get_info(video_id)
         if info:
             track = {
                 "id": video_id,
-                "title": info.get("title", "Sin título"),
+                "title": info.get("title", "Sin titulo"),
                 "duration": info.get("duration", 0),
                 "uploader": info.get("uploader", "")
             }
@@ -197,7 +214,6 @@ class Player:
         return False
 
     def remove_from_queue(self, index: int):
-        """Quita de la cola por índice."""
         with self._lock:
             if 0 <= index < len(self.queue):
                 removed = self.queue.pop(index)
@@ -211,7 +227,6 @@ class Player:
         return False
 
     def get_state(self):
-        """Devuelve el estado completo para la API."""
         with self._lock:
             state = {
                 "playing": self.playing,
@@ -229,9 +244,9 @@ class Player:
                     "uploader": self.current_info.get("uploader"),
                     "thumbnail": self.current_info.get("thumbnail"),
                 }
-            # Cache status
-            if self.cache_path and os.path.isfile(self.cache_path):
-                state["cache_bytes"] = os.path.getsize(self.cache_path)
+            cache_path = os.path.join(CACHE_DIR, f"{self.current_info.get('id')}.webm") if self.current_info else None
+            if cache_path and os.path.isfile(cache_path):
+                state["cache_bytes"] = os.path.getsize(cache_path)
             else:
                 state["cache_bytes"] = 0
             return state
