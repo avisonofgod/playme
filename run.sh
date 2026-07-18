@@ -1,27 +1,38 @@
 #!/bin/bash
-# PlayMe Application Launcher with full error capture
-# Captures all output to logs for debugging
-
-APP_DIR="/home/river/playme"
+# PlayMe v2 - Server Launcher
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="$APP_DIR/logs"
-ERROR_LOG="$LOG_DIR/errors.log"
-STDOUT_LOG="$LOG_DIR/stdout.log"
-
+PORT="${PORT:-8090}"
 mkdir -p "$LOG_DIR"
 
-echo "$(date): Starting PlayMe..." >> "$LOG_DIR/playme.log"
+echo "=== PlayMe v2 ==="
+echo "Puerto: $PORT"
+echo "Cache: /tmp/playme_cache"
+echo "Logs: $LOG_DIR"
+echo ""
 
-cd "$APP_DIR" || exit 1
+# Kill existing on our port
+fuser -k "${PORT}/tcp" 2>/dev/null
+sleep 0.5
 
-# Kill any existing mpv processes
-pkill -f "mpv" 2>/dev/null
-pkill -f "main.py" 2>/dev/null
-sleep 1
-
-# Run with all output captured
-python3 main.py >> "$STDOUT_LOG" 2>> "$ERROR_LOG" &
+# Start
+cd "$APP_DIR"
+PORT=$PORT python3 server.py >> "$LOG_DIR/stdout.log" 2>> "$LOG_DIR/errors.log" &
 
 PID=$!
-echo "PlayMe started with PID: $PID"
-echo "Monitor logs with: tail -f $LOG_DIR/playme.log"
-echo "Check errors with: tail -f $ERROR_LOG"
+echo "PID: $PID"
+echo ""
+echo "Monitor: tail -f $LOG_DIR/playme.log"
+echo "Errores: tail -f $LOG_DIR/errors.log"
+echo "Web: http://$(hostname -I 2>/dev/null | awk '{print $1}'):$PORT"
+echo ""
+
+# Verificar que arrancó
+sleep 1
+if kill -0 $PID 2>/dev/null; then
+    echo "✓ PlayMe corriendo (PID $PID)"
+else
+    echo "✗ PlayMe falló al arrancar"
+    tail -5 "$LOG_DIR/errors.log"
+    exit 1
+fi
