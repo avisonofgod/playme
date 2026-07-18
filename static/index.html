@@ -330,6 +330,7 @@ let audioElement = null;
 let mediaSource = null;
 let pollTimer = null;
 let searchResults = [];
+let changingTrack = false; // flag para evitar race condition en next/prev
 
 // ─── Audio engine ─────────────────────────────────────────
 function initAudio() {
@@ -349,21 +350,23 @@ function initAudio() {
 
 function playStream() {
   initAudio();
-  const mode = state.mode;
-
-  if (mode === 'proxy') {
-    // Proxy directo: el server redirige el stream de YouTube
+  
+  // Detener cualquier reproduccion previa de forma limpia
+  if (audioElement.src && audioElement.src !== window.location.href) {
+    audioElement.pause();
+    audioElement.removeAttribute('src');
+    audioElement.load();
+  }
+  
+  if (state.mode === 'proxy' || state.mode === 'file') {
     audioElement.src = '/api/stream';
     audioElement.load();
     audioElement.play().catch(e => {
-      console.error('Play error:', e);
-      setStatus('Error al reproducir: ' + e.message, 'error');
-    });
-  } else if (mode === 'pipe' || mode === 'file') {
-    // Archivo mp3 con Range support
-    audioElement.src = '/api/stream';
-    audioElement.load();
-    audioElement.play().catch(e => {
+      // Ignorar "interrupted by new load request" (es normal al cambiar de cancion rapido)
+      if (e.name === 'AbortError' || e.message.includes('interrupted')) {
+        console.log('Play interrupted (normal al cambiar de cancion)');
+        return;
+      }
       console.error('Play error:', e);
       setStatus('Error al reproducir: ' + e.message, 'error');
     });
@@ -470,21 +473,37 @@ async function togglePlay() {
 }
 
 async function nextTrack() {
-  stopAudio();
+  changingTrack = true;
   await api('POST', '/api/next');
-  await pollState();
-  if (state.playing) {
-    playStream();
+  const data = await api('GET', '/api/state');
+  if (data && data.ok) {
+    const oldId = state.current ? state.current.id : null;
+    state = data;
+    updateUI();
+    if (data.playing && data.current && data.current.id !== oldId) {
+      playStream();
+    } else if (!data.playing) {
+      stopAudio();
+    }
   }
+  changingTrack = false;
 }
 
 async function prevTrack() {
-  stopAudio();
+  changingTrack = true;
   await api('POST', '/api/prev');
-  await pollState();
-  if (state.playing) {
-    playStream();
+  const data = await api('GET', '/api/state');
+  if (data && data.ok) {
+    const oldId = state.current ? state.current.id : null;
+    state = data;
+    updateUI();
+    if (data.playing && data.current && data.current.id !== oldId) {
+      playStream();
+    } else if (!data.playing) {
+      stopAudio();
+    }
   }
+  changingTrack = false;
 }
 
 async function stopPlay() {
@@ -579,15 +598,15 @@ function updateUI() {
 async function pollState() {
   const data = await api('GET', '/api/state');
   if (data && data.ok) {
-    // Si cambió la canción, reiniciar audio
     const oldId = state.current ? state.current.id : null;
-    const newId = data.current ? data.current.id : null;
-
     const wasPlaying = state.playing;
     state = data;
     updateUI();
 
-    if (data.playing && newId !== oldId) {
+    // Si changingTrack esta activo, nextTrack/prevTrack ya manejo el play
+    if (changingTrack) return;
+
+    if (data.playing && data.current && data.current.id !== oldId) {
       playStream();
     } else if (!data.playing && wasPlaying) {
       stopAudio();
