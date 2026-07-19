@@ -58,16 +58,16 @@ def _run_conv(video_id):
     mp3_path = os.path.join(MP3_DIR, f"{video_id}.mp3")
     
     dl_args = resolver._args() + [
-        "--format", "251/bestaudio[abr>128]/bestaudio",
+        "--format", "bestaudio",
         "--output", webm_path,
         "--no-part", "--no-mtime",
         f"https://www.youtube.com/watch?v={video_id}"
     ]
     try:
-        subprocess.run(dl_args, capture_output=True, timeout=300)
+        subprocess.run(dl_args, capture_output=True, timeout=600)
         
         if not os.path.isfile(webm_path) or os.path.getsize(webm_path) == 0:
-            raise Exception("Download failed")
+            raise Exception("Download failed or empty")
         # FASE 2: Convertir a mp3 con ffmpeg (incluye metadatos)
         logger.info(f"Conv ffmpeg: {video_id}")
         titulo = _conversions[video_id].get("title", video_id)[:30]
@@ -97,6 +97,10 @@ def _run_conv(video_id):
             raise Exception("FFmpeg output not found")
     except Exception as e:
         logger.error(f"Conv fail: {video_id}: {e}")
+        # Limpiar webm huerfano si lo hay
+        try:
+            if os.path.isfile(webm_path): os.unlink(webm_path)
+        except: pass
         with _conv_lock:
             if video_id in _conversions:
                 _conversions[video_id]["status"] = "error"
@@ -332,15 +336,13 @@ class Handler(BaseHTTPRequestHandler):
                     c = dict(_conversions)
                 self._send(*json_res({"ok": True, "conversions": c}))
             elif path == "/api/clean/dl":
-                import shutil, signal
+                import shutil
                 try:
-                    # Matar procesos de conversion activos
+                    # Matar procesos yt-dlp y ffmpeg activos
                     for f in os.listdir(MP3_DIR):
                         if f.endswith(".webm"):
                             vid = f[:-5]
-                            for proc in ["yt-dlp", "ffmpeg"]:
-                                try: subprocess.run(["pkill", "-f", f"{proc}.*{vid}"], capture_output=True, timeout=5)
-                                except: pass
+                            subprocess.run(["pkill", "-9", "-f", vid], capture_output=True, timeout=5)
                     if os.path.isdir(MP3_DIR):
                         shutil.rmtree(MP3_DIR)
                         os.makedirs(MP3_DIR, exist_ok=True)
