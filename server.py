@@ -163,13 +163,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_mp3(self, video_id):
         """Sirve archivo mp3 si ya existe."""
+        # Extraer title del query string si existe
+        import urllib.parse
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        title = qs.get("title", [None])[0]
+        
         mp3 = os.path.join(MP3_DIR, f"{video_id}.mp3")
         if os.path.isfile(mp3):
             sz = os.path.getsize(mp3)
+            fname = title if title else video_id
+            # Limpiar nombre: 30 chars, solo ASCII seguros
+            fname = fname[:30].replace("/", "-").replace(" ", "-")
+            fname = "".join(c for c in fname if c.isalnum() or c in "._- ") or video_id
+            fname = fname.strip().replace(" ", "-") + ".mp3"
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")
             self.send_header("Content-Length", str(sz))
-            self.send_header("Content-Disposition", f'attachment; filename="{video_id}.mp3"')
+            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             with open(mp3, "rb") as f:

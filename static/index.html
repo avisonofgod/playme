@@ -270,7 +270,7 @@ function renderDl(convs) {
       + '<span style="flex:0 0 60px;text-align:center">'
     if (c.status==="ready") {
       var fname = (c.title || id).substring(0, 30).replace(/[^a-zA-Z0-9 _-]/g, "").replace(/ /g, "-") + ".mp3"
-      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'" download="'+fname+'">⬇</a>'
+      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'?title='+encodeURIComponent(c.title||id)+'" download="'+fname+'">⬇</a>'
     } else if (c.status==="error") {
       h += '<span class="dl-err">Error</span>'
     } else {
