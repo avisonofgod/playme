@@ -332,8 +332,15 @@ class Handler(BaseHTTPRequestHandler):
                     c = dict(_conversions)
                 self._send(*json_res({"ok": True, "conversions": c}))
             elif path == "/api/clean/dl":
-                import shutil
+                import shutil, signal
                 try:
+                    # Matar procesos de conversion activos
+                    for f in os.listdir(MP3_DIR):
+                        if f.endswith(".webm"):
+                            vid = f[:-5]
+                            for proc in ["yt-dlp", "ffmpeg"]:
+                                try: subprocess.run(["pkill", "-f", f"{proc}.*{vid}"], capture_output=True, timeout=5)
+                                except: pass
                     if os.path.isdir(MP3_DIR):
                         shutil.rmtree(MP3_DIR)
                         os.makedirs(MP3_DIR, exist_ok=True)
