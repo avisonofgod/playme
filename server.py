@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
                 # agregar estado de conversiones activas
                 with _conv_lock:
                     convs = dict(_conversions)
-                state["conversions"] = {k: {"progress": v["progress"]} for k, v in convs.items() if v["progress"] < 100}
+                state["conversions"] = {k: {"status": v["status"]} for k, v in convs.items()}
                 self._send(*json_res({"ok": True, **state}))
             elif path == "/api/stream":
                 self._handle_stream()
@@ -314,7 +314,7 @@ class Handler(BaseHTTPRequestHandler):
                 with _conv_lock:
                     if vid in _conversions:
                         c = _conversions[vid]
-                        self._send(*json_res({"ok": True, "status": c.get("status","converting"), "progress": c.get("progress",0)}))
+                        self._send(*json_res({"ok": True, "status": c.get("status","converting")}))
                         return
                 # Nueva conversion
                 logger.info(f"Conv queue: {vid} - {title}")
