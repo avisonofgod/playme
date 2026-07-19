@@ -68,19 +68,14 @@ def _run_conv(video_id):
         
         if not os.path.isfile(webm_path) or os.path.getsize(webm_path) == 0:
             raise Exception("Download failed")
-        # FASE 2: Convertir a mp3 con ffmpeg
+        # FASE 2: Convertir a mp3 con ffmpeg (incluye metadatos)
         logger.info(f"Conv ffmpeg: {video_id}")
-        mp3_temp = mp3_path + ".tmp"
-        ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "320k", "-y", mp3_temp]
-        subprocess.run(ff_args, capture_output=True, timeout=600)
-        
-        # Agregar metadatos ID3
         titulo = _conversions[video_id].get("title", video_id)[:30]
-        artista = video_id  # ID del video como Artist
-        id3_args = ["ffmpeg", "-i", mp3_temp, "-metadata", f"title={titulo}", "-metadata", f"artist={artista}", "-codec", "copy", "-y", mp3_path]
-        subprocess.run(id3_args, capture_output=True, timeout=30)
-        try: os.unlink(mp3_temp)
-        except: pass
+        artista = video_id
+        ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "320k",
+                    "-metadata", f"title={titulo}", "-metadata", f"artist={artista}",
+                    "-y", mp3_path]
+        subprocess.run(ff_args, capture_output=True, timeout=600)
         
         if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
             sz = os.path.getsize(mp3_path)
