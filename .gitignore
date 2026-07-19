@@ -1,33 +1,6 @@
-# Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg-info/
-dist/
-build/
-
-# Logs
-logs/
-*.log
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Temporary
-*.tmp
-*.bak
-
-# Sensitive: YouTube auth tokens
+logs/*.log
+/tmp/playme_*
 cookies.txt
 token.txt
