@@ -58,7 +58,7 @@ def _run_conv(video_id):
     mp3_path = os.path.join(MP3_DIR, f"{video_id}.mp3")
     
     dl_args = resolver._args() + [
-        "--format", "bestaudio",
+        "--format", "251/bestaudio[abr>128]/bestaudio",
         "--output", webm_path,
         "--no-part", "--no-mtime",
         f"https://www.youtube.com/watch?v={video_id}"
@@ -70,7 +70,7 @@ def _run_conv(video_id):
             raise Exception("Download failed")
         
         logger.info(f"Conv ffmpeg: {video_id}")
-        ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "192k", "-y", mp3_path]
+        ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "320k", "-y", mp3_path]
         subprocess.run(ff_args, capture_output=True, timeout=600)
         
         if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:

@@ -61,8 +61,8 @@ class Resolver:
         """Obtiene URL directa de audio. Prueba 3 extractors."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         strategies = [
-            {"f": "bestaudio", "e": "default"},
-            {"f": "bestaudio", "e": "youtube:player_client=android_creativecommons"},
+            {"f": "251/bestaudio", "e": "default"},
+            {"f": "251/bestaudio", "e": "youtube:player_client=android_creativecommons"},
             {"f": "bestaudio", "e": "youtube:player_client=web_creativecommons"},
         ]
         for s in strategies:
