@@ -19,10 +19,35 @@ class Resolver:
             a += extra
         return a
 
-    def search(self, query, limit=10):
+    def search(self, query, limit=10, tipo="video"):
+        """Busca en YouTube. tipo: video (default), channel, playlist"""
         try:
+            if tipo == "channel":
+                # Buscar canal y listar sus videos
+                search_query = f"ytsearch{limit}:{query}"
+            elif tipo == "playlist":
+                # Si query es un ID de playlist, listarla directamente
+                if query.startswith("PL") or query.startswith("RD") or len(query) == 34:
+                    out = subprocess.check_output(
+                        self._args(["--flat-playlist", "-J", f"https://www.youtube.com/playlist?list={query}"]),
+                        stderr=subprocess.DEVNULL, timeout=20
+                    ).decode()
+                    data = json.loads(out)
+                    return [{
+                        "id": e.get("id", ""),
+                        "title": e.get("title", "?"),
+                        "duration": e.get("duration", 0),
+                        "uploader": e.get("uploader", ""),
+                        "thumbnail": e.get("thumbnail", "")
+                    } for e in data.get("entries", [])]
+                else:
+                    # Buscar playlist por nombre
+                    search_query = f"ytsearch{limit}:{query}"
+            else:
+                search_query = f"ytsearch{limit}:{query}"
+            
             out = subprocess.check_output(
-                self._args(["--flat-playlist", "-J", f"ytsearch{limit}:{query}"]),
+                self._args(["--flat-playlist", "-J", search_query]),
                 stderr=subprocess.DEVNULL, timeout=20
             ).decode()
             data = json.loads(out)

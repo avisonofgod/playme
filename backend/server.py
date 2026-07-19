@@ -301,7 +301,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/search":
                 q = data.get("query", "").strip()
                 if not q: self._send(*err_res("query required")); return
-                self._send(*json_res({"ok": True, "results": resolver.search(q)}))
+                tipo = data.get("tipo", "video")
+                results = resolver.search(q, tipo=tipo)
+                self._send(*json_res({"ok": True, "results": results}))
             elif path == "/api/play":
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
