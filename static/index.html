@@ -251,7 +251,7 @@ function renderDl(convs) {
     var id=keys[i], c=convs[id], tit=esc(c.title||id)
     if (c.status==="ready") {
       var fname = (c.title || id).substring(0, 30).replace(/[^a-zA-Z0-9 _-]/g, "").replace(/ /g, "-") + ".mp3"
-      h += '<div class="dl-item"><span class="dt">'+tit+'</span><a class="dl-ok" href="/api/download/mp3/'+id+'" download="'+esc(fname)+'">⬇ Descargar</a></div>'
+      h += '<div class="dl-item"><span class="dt">'+tit+'</span><a class="dl-ok" href="/api/download/mp3/'+id+'" download="'+fname+'">⬇ Descargar</a></div>'
     } else if (c.status==="error") {
       h += '<div class="dl-item"><span class="dt">'+tit+'</span><span class="dl-err">Error</span></div>'
     } else {
