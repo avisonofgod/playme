@@ -316,6 +316,19 @@ class Handler(BaseHTTPRequestHandler):
                 with _conv_lock:
                     c = dict(_conversions)
                 self._send(*json_res({"ok": True, "conversions": c}))
+            elif path == "/api/clean/dl":
+                import shutil
+                try:
+                    if os.path.isdir(MP3_DIR):
+                        shutil.rmtree(MP3_DIR)
+                        os.makedirs(MP3_DIR, exist_ok=True)
+                    with _conv_lock:
+                        _conversions.clear()
+                    logger.info("Downloads cleaned")
+                    self._send(*json_res({"ok": True}))
+                except Exception as e:
+                    logger.error(f"Clean error: {e}")
+                    self._send(*err_res("Clean failed", 500))
             elif path == "/api/pause":
                 player.toggle_pause()
                 self._send(*json_res({"ok": True, **player.get_state()}))

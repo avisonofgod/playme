@@ -242,21 +242,41 @@ function pollDl() {
   })
 }
 
+function cleanDl() {
+  if (!confirm("Eliminar todas las descargas?")) return
+  api("POST","/api/clean/dl",{}).then(function(data) {
+    if (data && data.ok) {
+      pollDl()
+      st("Descargas eliminadas","success")
+    } else {
+      st("Error al limpiar","error")
+    }
+  })
+}
+
 function renderDl(convs) {
   var el=$("dlList")
   var keys=Object.keys(convs)
   if (!keys.length) { el.innerHTML='<div class="rm" style="padding:8px">Sin descargas</div>'; return }
-  var h=""
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span></span><button id="cleanDlBtn" style="background:#e94560;color:#fff;padding:4px 10px;font-size:0.75em;border:none;border-radius:4px;cursor:pointer">🗑 Limpiar todo</button></div>'
+  h += '<div style="display:flex;padding:4px 8px;font-size:0.75em;color:#889;border-bottom:1px solid #333">'
+    + '<span style="flex:2">TITULO</span><span style="flex:1">ID</span><span style="flex:0 0 60px;text-align:center">ACCION</span></div>'
   for (var i=0;i<keys.length;i++) {
     var id=keys[i], c=convs[id], tit=esc(c.title||id)
+    var idShort = id.length > 14 ? id.substring(0, 11) + "..." : id
+    h += '<div class="dl-item">'
+      + '<span class="dt" style="flex:2">'+tit+'</span>'
+      + '<span style="flex:1;font-size:0.75em;color:#889">'+idShort+'</span>'
+      + '<span style="flex:0 0 60px;text-align:center">'
     if (c.status==="ready") {
       var fname = (c.title || id).substring(0, 30).replace(/[^a-zA-Z0-9 _-]/g, "").replace(/ /g, "-") + ".mp3"
-      h += '<div class="dl-item"><span class="dt">'+tit+'</span><a class="dl-ok" href="/api/download/mp3/'+id+'" download="'+fname+'">⬇ Descargar</a></div>'
+      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'" download="'+fname+'">⬇</a>'
     } else if (c.status==="error") {
-      h += '<div class="dl-item"><span class="dt">'+tit+'</span><span class="dl-err">Error</span></div>'
+      h += '<span class="dl-err">Error</span>'
     } else {
-      h += '<div class="dl-item"><span class="dt">'+tit+'</span><span style="color:#e9a820;font-size:1.1em">⏳</span></div>'
+      h += '<span style="color:#e9a820;font-size:1.1em">⏳</span>'
     }
+    h += '</span></div>'
   }
   el.innerHTML=h
 }
@@ -289,6 +309,7 @@ document.addEventListener("click", function(e) {
   if (id==="searchBtn"){doSearch();return}
   if (id==="tabPlay"){switchTab("play");return}
   if (id==="tabDl"){switchTab("dl");return}
+  if (id==="cleanDlBtn"){cleanDl();return}
 })
 
 document.addEventListener("keydown",function(e) {
