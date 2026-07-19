@@ -4,7 +4,7 @@ Resolver: busca en YouTube y obtiene URLs de audio via yt-dlp.
 import json, logging, os, subprocess, threading
 
 logger = logging.getLogger(__name__)
-COOKIES = os.path.join(os.path.dirname(__file__), "cookies.txt")
+COOKIES = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies.txt")
 
 class Resolver:
     def __init__(self):

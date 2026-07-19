@@ -4,7 +4,7 @@ TokenManager: lee SAPISID de token.txt, construye cookies.txt.
 import logging, os, threading, time
 
 logger = logging.getLogger(__name__)
-COOKIES = os.path.join(os.path.dirname(__file__), "cookies.txt")
+COOKIES = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies.txt")
 
 class TokenManager:
     def __init__(self):
@@ -12,7 +12,7 @@ class TokenManager:
         self._load()
 
     def _load(self):
-        path = os.path.join(os.path.dirname(COOKIES), "token.txt")
+        path = os.path.join(os.path.dirname(os.path.dirname(COOKIES)), "token.txt")
         if os.path.isfile(path):
             with open(path) as f:
                 for line in f:
@@ -26,7 +26,7 @@ class TokenManager:
         if not sapisid or len(sapisid) < 20:
             return False
         self.sapisid = sapisid.strip()
-        path = os.path.join(os.path.dirname(COOKIES), "token.txt")
+        path = os.path.join(os.path.dirname(os.path.dirname(COOKIES)), "token.txt")
         with open(path, "w") as f:
             f.write(f"# PlayMe SAPISID\n{self.sapisid}\n")
         self._build()

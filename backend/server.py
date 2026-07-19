@@ -11,8 +11,8 @@ from transcoder import Transcoder
 from player import Player
 
 PORT = int(os.environ.get("PORT", "8090"))
-STATIC = os.path.join(os.path.dirname(__file__), "static")
-log_dir = os.path.join(os.path.dirname(__file__), "logs")
+STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
