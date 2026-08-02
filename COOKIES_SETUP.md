@@ -15,6 +15,11 @@ Los videos normales SÍ funcionan.
 
 **La ÚNICA solución:** cookies de sesión REAL de navegador (que contengan `SID` y `HSID`).
 
+> Además de las cookies, YouTube exige resolver el **n-challenge** para devolver
+> formatos de audio. Se resuelve con el challenge solver **yt-dlp-ejs** (usa
+> Deno, ya instalado). Ver "Instalar challenge solver" abajo. Sin él, yt-dlp
+> solo obtiene storyboards (imágenes) → "Requested format is not available".
+
 ---
 
 ## Haz esto (5 minutos)
@@ -45,29 +50,49 @@ dos líneas existan (los valores son secretos, no los compartas):
 > Cookies sin SID/HSID = anónimas = no sirven para el bot-check.
 
 ### 5. Pégalas en el servidor
-Sube ese archivo al directorio del proyecto con este nombre:
-
-```
-cookies.txt
-```
-
-Opcionalmente haz una copia de respaldo como `cookies_master.txt`.
-
-En el servidor PlayMe:
+Sube ese archivo al servidor (ej: `/root/cookies_exportadas.txt`) y NORMALIZALO
+(imprescindible, ver advertencia abajo):
 
 ```bash
 cd /root/proyectos/Playme
-# reemplaza con tu archivo (ajusta la ruta origen)
-cp /path/en/tu/maquina/cookies.txt ./cookies.txt
-chmod 600 ./cookies.txt
+# 1) filtra youtube/google + normaliza dominios (evita el bug de Python 3.12):
+python3 backend/normalize_cookies.py /root/cookies_exportadas.txt
+#    -> genera cookies.txt (solo youtube/google, listo para yt-dlp)
 
-# verificar que llegaron SID y HSID (debe imprimir >=1 para cada uno):
+# 2) verificar que llegaron SID y HSID (debe imprimir >=1 para cada uno):
 grep -c $'\tSID\t'   cookies.txt
 grep -c $'\tHSID\t'  cookies.txt
 ```
 
+> ⚠️ El archivo exportado crudo (con cookies de TODOS los sitios) ROMPE el
+> parser de yt-dlp/Python 3.12 (`assert domain_specified == initial_dot`).
+> Por eso se filtra y normaliza. También es más seguro: no subes cookies de
+> otros sitios (Netflix, bancos, etc.) al servidor.
+
 El resolver **ya usa `cookies.txt` automáticamente** vía una copia temporal
 (`/tmp/playme_cookies.txt`), por lo que NO hace falta reiniciar nada.
+
+---
+
+## Instalar challenge solver (yt-dlp-ejs) — UNA VEZ
+
+Sin este paquete, yt-dlp no resuelve el n-challenge de YouTube y no obtiene
+formatos de audio (solo storyboards/imágenes).
+
+```bash
+pip install --break-system-packages yt-dlp-ejs
+# verificar:
+python3 -c "import yt_dlp_ejs; print('OK')"
+```
+
+yt-dlp lo detecta automáticamente (usa Deno como runtime JS). Requisito: Deno
+instalado (`which deno`). Verificar con un video cualquiera:
+
+```bash
+yt-dlp --cookies /tmp/playme_cookies.txt --get-url --format '251/bestaudio' \
+  'https://www.youtube.com/watch?v=SUpRMcWin64'
+# debe imprimir una URL https://rr*.googlevideo.com/... (no un ERROR)
+```
 
 ---
 
