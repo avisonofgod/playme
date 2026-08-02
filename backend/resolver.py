@@ -1,20 +1,28 @@
 """
 Resolver: busca en YouTube y obtiene URLs de audio via yt-dlp.
 """
-import json, logging, os, subprocess, threading
+import json, logging, os, subprocess, threading, shutil, tempfile
 
 logger = logging.getLogger(__name__)
-COOKIES = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies.txt")
+COOKIES_MASTER = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies_master.txt")
+COOKIES_TEMP = os.path.join(tempfile.gettempdir(), "playme_cookies.txt")
 
 class Resolver:
     def __init__(self):
         self.ytdlp = "yt-dlp"
         self._sem = threading.Semaphore(1)  # solo un yt-dlp a la vez
+        self._sync_cookies()  # copia inicial
+
+    def _sync_cookies(self):
+        """Copia cookies_master a temp para que yt-dlp no sobrescriba el original."""
+        if os.path.isfile(COOKIES_MASTER) and os.path.getsize(COOKIES_MASTER) > 0:
+            shutil.copy2(COOKIES_MASTER, COOKIES_TEMP)
 
     def _args(self, extra=None):
-        a = [self.ytdlp, "--remote-components", "ejs:github"]
-        if os.path.isfile(COOKIES) and os.path.getsize(COOKIES) > 0:
-            a += ["--cookies", COOKIES]
+        self._sync_cookies()  # asegura copia fresca antes de cada comando
+        a = [self.ytdlp]
+        if os.path.isfile(COOKIES_TEMP) and os.path.getsize(COOKIES_TEMP) > 0:
+            a += ["--cookies", COOKIES_TEMP]
         if extra:
             a += extra
         return a

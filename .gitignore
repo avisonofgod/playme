@@ -4,3 +4,4 @@ logs/*.log
 /tmp/playme_*
 cookies.txt
 token.txt
+cookies_master.txt
