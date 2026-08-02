@@ -168,10 +168,10 @@ function doSearch() {
 }
 
 function playV(id) {
-  st("Cargando...","loading")
-  api("POST","/api/play",{video_id:id}).then(function(data) {
-    if (data&&data.ok) { state=data; updateUI(); playAudio(); st("Reproduciendo","success") }
-    else st("Error","error")
+  st("Cargando...", "loading")
+  api("POST", "/api/play", {video_id: id}).then(function(data) {
+    if (data && data.ok) { state = data; updateUI(); playAudio(); st("Reproduciendo", "success") }
+    else st(data && data.error ? data.error : "Error", "error")
   })
 }
 

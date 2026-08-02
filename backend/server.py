@@ -310,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
                 if player.play(vid):
                     self._send(*json_res({"ok": True, **player.get_state()}))
                 else:
-                    self._send(*err_res("Play failed", 500))
+                    self._send(*err_res(player.last_error or "Play failed", 500))
             elif path == "/api/convert":
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return

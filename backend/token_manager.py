@@ -13,7 +13,8 @@ class TokenManager:
         self._load()
 
     def _load(self):
-        path = os.path.join(os.path.dirname(os.path.dirname(COOKIES)), "token.txt")
+        # token.txt vive junto a cookies.txt en la raiz del proyecto
+        path = os.path.join(os.path.dirname(COOKIES), "token.txt")
         if os.path.isfile(path):
             with open(path) as f:
                 for line in f:
@@ -27,7 +28,7 @@ class TokenManager:
         if not sapisid or len(sapisid) < 20:
             return False
         self.sapisid = sapisid.strip()
-        path = os.path.join(os.path.dirname(os.path.dirname(COOKIES)), "token.txt")
+        path = os.path.join(os.path.dirname(COOKIES), "token.txt")
         with open(path, "w") as f:
             f.write(f"# PlayMe SAPISID\n{self.sapisid}\n")
         self._ensure()

@@ -17,6 +17,7 @@ class Player:
         self.stream_url = None
         self.cache_path = None
         self.current = None  # dict con id, title, duration, uploader, thumbnail
+        self.last_error = None  # causa real del ultimo fallo de reproduccion
         self._lock = threading.Lock()
 
     def get_state(self):
@@ -33,6 +34,7 @@ class Player:
                 s["cache_bytes"] = self.tr.size(self.current["id"])
             else:
                 s["cache_bytes"] = 0
+            s["last_error"] = self.last_error
             return s
 
     def _resolve_and_set(self, video_id):
@@ -48,7 +50,8 @@ class Player:
         else:
             surl = self.res.get_stream_url(video_id)
             if not surl:
-                logger.error(f"no stream for {video_id}")
+                self.last_error = self.res.last_error or f"no stream for {video_id}"
+                logger.error(f"no stream for {video_id}: {self.last_error}")
                 return False
             mode = "proxy"
             t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
@@ -63,6 +66,7 @@ class Player:
         }
 
         with self._lock:
+            self.last_error = None  # exito: limpiar error anterior
             self.playing = True
             self.paused = False
             self.mode = mode
@@ -136,6 +140,7 @@ class Player:
             self.current = None
             self.queue = []
             self.idx = -1
+            self.last_error = None
 
     def add_queue(self, video_id, title=None, duration=0, uploader=""):
         track = {
