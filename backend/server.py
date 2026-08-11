@@ -1,5 +1,6 @@
 """
 PlayMe v3 - HTTP Server modular.
+Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
 """
 import json, logging, os, re, select, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -56,7 +57,13 @@ def _run_conv(video_id):
     logger.info(f"Conv running: {video_id}")
     webm_path = os.path.join(MP3_DIR, f"{video_id}.webm")
     mp3_path = os.path.join(MP3_DIR, f"{video_id}.mp3")
-    
+
+    # snapshot seguro bajo lock: titulo para metadatos
+    with _conv_lock:
+        entry = _conversions.get(video_id, {})
+    titulo = entry.get("title", video_id)[:30]
+    artista = video_id
+
     dl_args = resolver._args() + [
         "--format", "bestaudio",
         "--output", webm_path,
@@ -65,22 +72,22 @@ def _run_conv(video_id):
     ]
     try:
         subprocess.run(dl_args, capture_output=True, timeout=600)
-        
+
         if not os.path.isfile(webm_path) or os.path.getsize(webm_path) == 0:
             raise Exception("Download failed or empty")
         # FASE 2: Convertir a mp3 con ffmpeg (incluye metadatos)
         logger.info(f"Conv ffmpeg: {video_id}")
-        titulo = _conversions[video_id].get("title", video_id)[:30]
-        artista = video_id
         ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "320k",
                     "-metadata", f"title={titulo}", "-metadata", f"artist={artista}",
                     "-y", mp3_path]
         subprocess.run(ff_args, capture_output=True, timeout=600)
-        
+
         if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
             sz = os.path.getsize(mp3_path)
             with _conv_lock:
-                _conversions[video_id]["status"] = "ready"
+                entry = _conversions.get(video_id, {})
+                entry["status"] = "ready"
+                _conversions[video_id] = entry
             logger.info(f"Conv done: {video_id} ({sz} bytes)")
             try: os.unlink(webm_path)
             except: pass
@@ -90,7 +97,7 @@ def _run_conv(video_id):
                 titles = {}
                 if os.path.isfile(tpath):
                     with open(tpath) as f: titles = json.load(f)
-                titles[video_id] = _conversions[video_id].get("title", video_id)
+                titles[video_id] = titulo
                 with open(tpath, "w") as f: json.dump(titles, f)
             except: pass
         else:
@@ -176,19 +183,21 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         title = qs.get("title", [None])[0]
-        
+
         mp3 = os.path.join(MP3_DIR, f"{video_id}.mp3")
         if os.path.isfile(mp3):
             sz = os.path.getsize(mp3)
             fname = title if title else video_id
-            # Limpiar nombre: 30 chars, solo ASCII seguros
+            # Limpiar nombre: 30 chars, solo caracteres seguros (escapar comillas/punto-coma)
             fname = fname[:30].replace("/", "-").replace(" ", "-")
             fname = "".join(c for c in fname if c.isalnum() or c in "._- ") or video_id
             fname = fname.strip().replace(" ", "-") + ".mp3"
+            # sanear: quitar comillas, punto-coma y backslash que romperian el header
+            fname = fname.replace('"', "").replace(";", "").replace(chr(92), "-")
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")
             self.send_header("Content-Length", str(sz))
-            self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+            self.send_header('Content-Disposition', f'attachment; filename="{fname}"')
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             with open(mp3, "rb") as f:
@@ -217,7 +226,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(c)
 
     def _handle_stream(self):
-        with threading.Lock():
+        # Bugfix: usar el lock real del player, no un nuevo threading.Lock() efimero
+        with player._lock:
             mode = player.mode
             surl = player.stream_url
             cpath = player.cache_path
@@ -274,8 +284,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ct)
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Accept-Ranges", "bytes")
-            if cl and not range_h: self.send_header("Content-Length", cl)
-            if cr: self.send_header("Content-Range", cr)
+            # Bugfix: enviar Content-Length SIEMPRE que el upstream la de (incluso con Range)
+            if cl:
+                self.send_header("Content-Length", cl)
+            if cr:
+                self.send_header("Content-Range", cr)
             self.end_headers()
             while True:
                 r, _, _ = select.select([resp.fp], [], [], 30)

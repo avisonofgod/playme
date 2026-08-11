@@ -1,8 +1,5 @@
-"""
-Player: cola, reproduccion, estado.
-"""
+"""Player: cola, reproduccion, estado."""
 import logging, os, threading
-
 logger = logging.getLogger(__name__)
 
 class Player:
@@ -13,11 +10,11 @@ class Player:
         self.idx = -1
         self.playing = False
         self.paused = False
-        self.mode = None  # "file" | "proxy"
+        self.mode = None
         self.stream_url = None
         self.cache_path = None
-        self.current = None  # dict con id, title, duration, uploader, thumbnail
-        self.last_error = None  # causa real del ultimo fallo de reproduccion
+        self.current = None
+        self.last_error = None
         self._lock = threading.Lock()
 
     def get_state(self):
@@ -28,7 +25,7 @@ class Player:
                 "mode": self.mode,
                 "current_index": self.idx,
                 "queue": list(self.queue),
-                "current": self.current,
+                "current": dict(self.current) if self.current else None,
             }
             if self.current and self.current.get("id"):
                 s["cache_bytes"] = self.tr.size(self.current["id"])
@@ -38,11 +35,9 @@ class Player:
             return s
 
     def _resolve_and_set(self, video_id):
-        """Resuelve y actualiza estado de reproduccion. No toca cola."""
         info = self.res.get_info(video_id)
         if not info:
             info = {"id": video_id, "title": f"YouTube {video_id}", "duration": 0, "uploader": ""}
-
         cache_p = self.tr.path(video_id)
         if self.tr.is_cached(video_id):
             mode = "file"
@@ -56,7 +51,6 @@ class Player:
             mode = "proxy"
             t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
             t.start()
-
         track = {
             "id": video_id,
             "title": info.get("title", f"YouTube {video_id}"),
@@ -64,9 +58,8 @@ class Player:
             "uploader": info.get("uploader", ""),
             "thumbnail": info.get("thumbnail", ""),
         }
-
         with self._lock:
-            self.last_error = None  # exito: limpiar error anterior
+            self.last_error = None
             self.playing = True
             self.paused = False
             self.mode = mode
@@ -76,14 +69,12 @@ class Player:
         return True
 
     def _play_current(self):
-        """Reproduce el track actual sin modificar cola."""
         if self.idx < 0 or self.idx >= len(self.queue):
             return False
         t = self.queue[self.idx]
         return self._resolve_and_set(t["id"])
 
     def play(self, video_id):
-        """Reproduce y agrega a cola."""
         if not self._resolve_and_set(video_id):
             return False
         track = dict(self.current)
@@ -100,15 +91,12 @@ class Player:
         with self._lock:
             if self.idx < len(self.queue) - 1:
                 self.idx += 1
-                vid = self.queue[self.idx]["id"]
             else:
                 self.stop()
                 return False
         ok = self._play_current()
         if not ok:
-            # Revertir
-            with self._lock:
-                self.idx -= 1
+            self._restore_after_fail(-1)
             return False
         return True
 
@@ -116,15 +104,18 @@ class Player:
         with self._lock:
             if self.idx > 0:
                 self.idx -= 1
-                vid = self.queue[self.idx]["id"]
             else:
                 return False
         ok = self._play_current()
         if not ok:
-            with self._lock:
-                self.idx += 1
+            self._restore_after_fail(1)
             return False
         return True
+
+    def _restore_after_fail(self, delta):
+        """Si _play_current fallo, restaura idx y conserva el track anterior."""
+        with self._lock:
+            self.idx += delta  # revertir el desplazamiento
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -161,5 +152,12 @@ class Player:
                     self.idx -= 1
                 elif index == self.idx:
                     self.idx = -1
+                    self.playing = False
+                    self.paused = False
+                    self.mode = None
+                    self.stream_url = None
+                    self.cache_path = None
+                    self.current = None
+                    self.last_error = None
                 return True
         return False
