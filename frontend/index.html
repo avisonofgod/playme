@@ -50,6 +50,12 @@ button > *{pointer-events:none}
 .dl-item .dt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dl-ok{color:#44bd32;cursor:pointer;text-decoration:none;font-size:0.8em}
 .dl-err{color:#e94560;font-size:0.75em}
+/* ── Ruleta: listado con scroll enmascarado (8 filas visibles) ── */
+.ruleta{position:relative;max-height:calc(8 * 34px);overflow-y:auto;scroll-behavior:smooth;scrollbar-width:none;-ms-overflow-style:none}
+.ruleta::-webkit-scrollbar{display:none}
+.ruleta::before,.ruleta::after{content:"";position:sticky;display:block;height:12px;z-index:1;pointer-events:none}
+.ruleta::before{top:0;background:linear-gradient(to bottom,rgba(13,13,13,1),rgba(13,13,13,0))}
+.ruleta::after{bottom:0;background:linear-gradient(to top,rgba(13,13,13,1),rgba(13,13,13,0));margin-top:-12px}
 </style>
 </head>
 <body>
@@ -63,7 +69,7 @@ button > *{pointer-events:none}
 <div id="panelPlay" class="tab active">
 <input id="q" placeholder="Buscar..." autofocus>
 <button id="searchBtn">🔍 Buscar</button>
-<div id="results"></div>
+<div id="results" class="ruleta"></div>
 <div id="np">
 <div class="t" id="npTitle">—</div>
 <div class="m" id="npMeta">—</div>
@@ -82,7 +88,7 @@ button > *{pointer-events:none}
 <!-- TAB DOWNLOADS -->
 <div id="panelDl" class="tab">
 <h3 style="color:#e9a820;margin-bottom:8px">⬇ Descargas</h3>
-<div id="dlList"><div class="rm" style="padding:8px">Sin descargas</div></div>
+<div id="dlList" class="ruleta"><div class="rm" style="padding:8px">Sin descargas</div></div>
 </div>
 
 <script>
