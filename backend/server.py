@@ -17,7 +17,7 @@ from token_manager import TokenManager
 from transcoder import Transcoder
 from player import Player
 from cookie_parser import build_cookie_header
-from runner import run_command
+from runner import run_command, _kill_group as _kill_group_runner
 
 PORT = int(os.environ.get("PORT", "8090"))
 STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
@@ -435,7 +435,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
-            _kill_group(proc)  # el cliente corto: no seguir descargando (mata hijoY nietos)
+            _kill_group_runner(proc)  # kill de grupo (runner): no seguir descargando (mata hijoY nietos)
 
     def _serve_file(self, path):
         sz = os.path.getsize(path)
@@ -448,7 +448,8 @@ class Handler(BaseHTTPRequestHandler):
                 if len(parts) > 1 and parts[1]: end = int(parts[1])
             except: pass
         ct = {"webm": "audio/webm", "mp3": "audio/mpeg"}.get(path.split(".")[-1], "audio/webm")
-        if start > 0:
+        if range_h.startswith("bytes="):
+            # cualquier Range (incluido bytes=0-) -> respuesta parcial 206
             self.send_response(206)
             self.send_header("Content-Range", f"bytes {start}-{end}/{sz}")
             cl = end - start + 1
@@ -629,22 +630,6 @@ class Handler(BaseHTTPRequestHandler):
             except: pass
 
 
-def _kill_group(proc):
-    """Mata el grupo de procesos del hijo (session) para eliminar tambien los
-    nietos. Comparte logica con runner._kill_group."""
-    import signal as _sig
-    try:
-        os.killpg(os.getpgid(proc.pid), _sig.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
-        try:
-            proc.kill()
-        except Exception:
-            pass
-    try:
-        proc.wait(timeout=2)
-    except Exception:
-        pass
-
 
 def main():
     os.makedirs(STATIC, exist_ok=True)
@@ -656,7 +641,7 @@ def main():
         daemon_threads = True
 
     server = Threaded(("0.0.0.0", PORT), Handler)
-    logger.info(f"PlayMe v9-proxy-range en http://0.0.0.0:{PORT}")
+    logger.info(f"PlayMe v11-limpieza en http://0.0.0.0:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
