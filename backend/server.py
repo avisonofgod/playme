@@ -2,6 +2,9 @@
 PlayMe v3 - HTTP Server modular.
 Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
 v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbidden).
+v5-fix-selec: streaming sin select.select (Python 3.13 fp sin fileno).
+v6-robustez: rate limiting por IP, limite de conversions, metadata en queue/add,
+             y kill de grupo en timeouts (runner).
 """
 import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -12,6 +15,7 @@ from token_manager import TokenManager
 from transcoder import Transcoder
 from player import Player
 from cookie_parser import build_cookie_header
+from runner import run_command
 
 PORT = int(os.environ.get("PORT", "8090"))
 STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
@@ -45,13 +49,77 @@ MP3_DIR = "/tmp/playme_mp3"
 os.makedirs(MP3_DIR, exist_ok=True)
 
 # Tamano del chunk de streaming cuando el cliente pide un rango abierto
-# (bytes=0-): googlevideo rechaza rangos abiertos (403) y tambien rangos
-# mayores a ~1MB (verificado: 4MB->403, 1MB->206).
 MAX_CHUNK = 1024 * 1024  # 1MB
+
+# ── Rate limiting por IP (token bucket simple por endpoint) ──
+_RATE_LOCK = threading.Lock()
+_RATE = {
+    "/api/convert": {"max": 10, "window_sec": 60, "hits": {}},     # 10/min
+    "/api/search": {"max": 15, "window_sec": 60, "hits": {}},      # 15/min
+}
+_RATE_INACTIVE_SEC = 600  # limpiar ips inactivas > 10 min
+
+
+def _rate_limited(path, ip):
+    """Devuelve True si la ip excede el limite para el endpoint. Token bucket
+    de ventana deslizante: cuenta hits en los ultimos `window_sec` segundos."""
+    cfg = _RATE.get(path)
+    if not cfg:
+        return False
+    now = time.time()
+    with _RATE_LOCK:
+        hits = cfg["hits"].setdefault(ip, [])
+        # descartar hits fuera de la ventana
+        cutoff = now - cfg["window_sec"]
+        wins = [t for t in hits if t > cutoff]
+        if len(wins) >= cfg["max"]:
+            cfg["hits"][ip] = wins
+            return True
+        wins.append(now)
+        cfg["hits"][ip] = wins
+    return False
+
+
+def _cleanup_rates():
+    """Elimina ips inactivas (>10min) para que el dict no crezca sin limite."""
+    now = time.time()
+    with _RATE_LOCK:
+        for path, cfg in _RATE.items():
+            stale = [ip for ip, hits in cfg["hits"].items()
+                     if not hits or (now - max(hits)) > _RATE_INACTIVE_SEC]
+            for ip in stale:
+                del cfg["hits"][ip]
+
 
 # ── Converter: descargas mp3 en background ──
 _conv_lock = threading.Lock()
 _conversions = {}  # video_id -> {"progress": 0-100, "path": str or None, "error": str or None}
+_MAX_CONVERSIONS = 50  # limite de entradas en _conversions
+
+
+def _evict_conversions():
+    """Evicta las TERMINADAS mas antiguas si _conversions supera el limite.
+    NUNCA evicta una en curso (status converting/downloading)."""
+    with _conv_lock:
+        while len(_conversions) > _MAX_CONVERSIONS:
+            # entradas terminadas, ordenadas por antiguedad de insercion
+            done = [(k, v) for k, v in _conversions.items()
+                    if v.get("status") in ("ready", "error")]
+            if not done:
+                break  # todas en curso: no forzar eviction
+            done.sort(key=lambda kv: 0)  # insert order via _order
+            oldest = None
+            # _conversions no tiene orden de insercion nativo; usamos un orden
+            # estable por el orden de insercion del dict (Python 3.7+)
+            for k in list(_conversions.keys()):
+                if _conversions[k].get("status") in ("ready", "error"):
+                    oldest = k
+                    break
+            if oldest is None:
+                break
+            del _conversions[oldest]
+            logger.info(f"conversions evict: {oldest}")
+
 
 def _scan_existing_mp3():
     """Escanea MP3_DIR al arrancar y reconstruye conversions."""
@@ -70,6 +138,7 @@ def _scan_existing_mp3():
                 tit = titles.get(vid, vid)
                 _conversions[vid] = {"status": "ready", "title": tit}
 
+
 _scan_existing_mp3()
 
 def build_stream_request(url, range_h):
@@ -82,6 +151,7 @@ def build_stream_request(url, range_h):
     if range_h:
         req.add_header("Range", range_h)
     return req
+
 
 def _run_conv(video_id):
     logger.info(f"Conv running: {video_id}")
@@ -101,7 +171,7 @@ def _run_conv(video_id):
         f"https://www.youtube.com/watch?v={video_id}"
     ]
     try:
-        subprocess.run(dl_args, capture_output=True, timeout=600)
+        run_command(dl_args, timeout=600)
 
         if not os.path.isfile(webm_path) or os.path.getsize(webm_path) == 0:
             raise Exception("Download failed or empty")
@@ -110,7 +180,7 @@ def _run_conv(video_id):
         ff_args = ["ffmpeg", "-i", webm_path, "-vn", "-acodec", "libmp3lame", "-ab", "320k",
                     "-metadata", f"title={titulo}", "-metadata", f"artist={artista}",
                     "-y", mp3_path]
-        subprocess.run(ff_args, capture_output=True, timeout=600)
+        run_command(ff_args, timeout=600)
 
         if os.path.isfile(mp3_path) and os.path.getsize(mp3_path) > 0:
             sz = os.path.getsize(mp3_path)
@@ -142,6 +212,7 @@ def _run_conv(video_id):
             if video_id in _conversions:
                 _conversions[video_id]["status"] = "error"
 
+
 def json_res(data, status=200):
     body = json.dumps(data).encode()
     return status, {"Content-Type": "application/json", "Content-Length": str(len(body))}, body
@@ -152,6 +223,7 @@ def err_res(msg, status=400):
 def read_body(handler):
     length = int(handler.headers.get("Content-Length", "0"))
     return handler.rfile.read(length) if length else b""
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
@@ -167,6 +239,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def _client_ip(self):
+        """IP del cliente para rate limiting (sin confiar en headers)."""
+        return self.client_address[0]
 
     def do_HEAD(self):
         path = self.path.split("?")[0]
@@ -264,9 +340,6 @@ class Handler(BaseHTTPRequestHandler):
         if mode == "file" and cpath and os.path.exists(cpath):
             self._serve_file(cpath)
         elif mode == "proxy":
-            # googlevideo solo sirve el primer MB (rango desde 0, max ~1MB):
-            # el proxy HTTP plano se cortaba al segundo chunk (403) y el audio
-            # moria a 1MB. yt-dlp a stdout maneja el stream completo.
             vid = player.current.get("id") if player.current else ""
             self._proxy_ytdlp(vid)
         else:
@@ -275,8 +348,7 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy_ytdlp(self, video_id):
         """Streaming via yt-dlp a stdout (subprocess). El navegador recibe el
         audio completo sin cortes (googlevideo rechaza chunks >1MB y rangos
-        que no empiezan en 0). Sin seek (Content-Length desconocida, conexion
-        se cierra al terminar) pero reproduccion continua fiable."""
+        que no empiezan en 0)."""
         if not video_id:
             self._send(*err_res("No stream", 404))
             return
@@ -289,7 +361,8 @@ class Handler(BaseHTTPRequestHandler):
             f"https://www.youtube.com/watch?v={video_id}",
         ]
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    start_new_session=True)
         except Exception as e:
             logger.error(f"ytdlp spawn: {e}")
             self._send(*err_res("Stream error", 502))
@@ -308,8 +381,7 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
-            proc.kill()  # el cliente corto: no seguir descargando
-            proc.wait()
+            _kill_group(proc)  # el cliente corto: no seguir descargando (mata hijoY nietos)
 
     def _serve_file(self, path):
         sz = os.path.getsize(path)
@@ -345,10 +417,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _proxy(self, url):
         """Proxy de streaming. Envia headers de navegador + cookies para que
-        googlevideo no rechace con 403. Mantiene Range/CL/Content-Range.
-        googlevideo EXIGE Range CON FIN: rechaza rangos abiertos 'bytes=0-'
-        (403). El navegador manda 'bytes=0-' al iniciar -> se convierte a un
-        chunk con fin (bytes=0-<MAX_CHUNK-1>)."""
+        googlevideo no rechace con 403. Mantiene Range/CL/Content-Range."""
         range_h = self.headers.get("Range", "")
         upstream_range = range_h if range_h else "bytes=0-"
         if upstream_range.endswith("-"):
@@ -369,17 +438,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ct)
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Accept-Ranges", "bytes")
-            # Bugfix: enviar Content-Length SIEMPRE que el upstream la de (incluso con Range)
             if cl:
                 self.send_header("Content-Length", cl)
             if cr:
                 self.send_header("Content-Range", cr)
             self.end_headers()
             while True:
-                # Lectura directa: select.select([resp.fp]) falla en Python 3.13
-                # (resp.fp de urllib no tiene fileno()) y cortaba el stream tras
-                # el primer chunk. El read bloqueante termina solo: b'' si el
-                # upstream corta, BrokenPipe si el cliente cierra.
                 try:
                     c = resp.read(65536)
                 except Exception:
@@ -398,11 +462,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        ip = self._client_ip()
+        _cleanup_rates()  # mantiene el rate-dict acotado
         try:
             data = json.loads(read_body(self)) if self.headers.get("Content-Length", "0") != "0" else {}
         except:
             self._send(*err_res("Invalid JSON", 400)); return
         try:
+            if path in ("/api/search", "/api/convert"):
+                if _rate_limited(path, ip):
+                    logger.warning(f"rate limit {ip} {path}")
+                    self._send(*err_res("rate limit", 429))
+                    return
             if path == "/api/search":
                 q = data.get("query", "").strip()
                 if not q: self._send(*err_res("query required")); return
@@ -431,7 +502,8 @@ class Handler(BaseHTTPRequestHandler):
                         c = _conversions[vid]
                         self._send(*json_res({"ok": True, "status": c.get("status","converting")}))
                         return
-                # Nueva conversion
+                # Nueva conversion (acotar las entradas terminadas antes)
+                _evict_conversions()
                 logger.info(f"Conv queue: {vid} - {title}")
                 with _conv_lock:
                     _conversions[vid] = {"status": "converting", "title": title}
@@ -478,7 +550,17 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/queue/add":
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
-                player.add_queue(vid, data.get("title"), data.get("duration", 0), data.get("uploader", ""))
+                # Metadata: si el titulo llega vacio, es placeholder "YouTube <id>"
+                # o no viene, resolver la metadata real con get_info.
+                title = data.get("title") or ""
+                duration = data.get("duration", 0)
+                uploader = data.get("uploader", "")
+                if (not title or title == f"YouTube {vid}"):
+                    info = resolver.get_info(vid) or {}
+                    title = info.get("title") or title or f"YouTube {vid}"
+                    duration = info.get("duration", duration or 0)
+                    uploader = info.get("uploader", uploader or "")
+                player.add_queue(vid, title, duration, uploader)
                 self._send(*json_res({"ok": True, **player.get_state()}))
             elif path == "/api/queue/remove":
                 idx = data.get("index", -1)
@@ -492,6 +574,24 @@ class Handler(BaseHTTPRequestHandler):
             try: self._send(*err_res(str(e), 500))
             except: pass
 
+
+def _kill_group(proc):
+    """Mata el grupo de procesos del hijo (session) para eliminar tambien los
+    nietos. Comparte logica con runner._kill_group."""
+    import signal as _sig
+    try:
+        os.killpg(os.getpgid(proc.pid), _sig.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        pass
+
+
 def main():
     os.makedirs(STATIC, exist_ok=True)
     transcoder.cleanup()
@@ -502,7 +602,7 @@ def main():
         daemon_threads = True
 
     server = Threaded(("0.0.0.0", PORT), Handler)
-    logger.info(f"PlayMe v4-fix403 en http://0.0.0.0:{PORT}")
+    logger.info(f"PlayMe v6-robustez en http://0.0.0.0:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
