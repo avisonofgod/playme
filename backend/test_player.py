@@ -1,7 +1,10 @@
 """Tests de Player: cola, next/prev/pause/stop, restore tras fallo, remove.
 
 Usa una instancia de Player con mocks de resolver/transcoder, sin red.
+El play es ASINCRONO (resolucion en thread): los tests esperan con
+wait_resolved() hasta que el estado este listo.
 """
+import time
 import unittest
 
 from player import Player
@@ -47,11 +50,22 @@ def make_player(**kwargs):
     return Player(FakeResolver(), FakeTranscoder())
 
 
+def wait_resolved(p, timeout=1.0):
+    """Espera a que el play asincrono termine de resolver."""
+    end = time.time() + timeout
+    while time.time() < end:
+        with p._lock:
+            if not p._resolving:
+                return True
+        time.sleep(0.02)
+    return False
+
+
 class PlayerCoreTest(unittest.TestCase):
     def test_play_arranca_en_modo_proxy(self):
         p = make_player()
-        ok = p.play("abc123")
-        self.assertTrue(ok)
+        self.assertTrue(p.play("abc123"))
+        self.assertTrue(wait_resolved(p))
         self.assertTrue(p.playing)
         self.assertEqual(p.mode, "proxy")
         self.assertEqual(p.queue[0]["id"], "abc123")
@@ -62,18 +76,25 @@ class PlayerCoreTest(unittest.TestCase):
         p = make_player()
         p.tr.cached.add("cached1")
         self.assertTrue(p.play("cached1"))
+        self.assertTrue(wait_resolved(p))
         self.assertEqual(p.mode, "file")
         self.assertIsNone(p.stream_url)
 
     def test_play_fallo_por_stream_deja_error(self):
         p = make_player()
         p.res.stream_fail = True
-        self.assertFalse(p.play("bad1"))
+        # play async: siempre responde True; el fallo aparece en last_error y
+        # el estado no queda en modo reproduccion
+        self.assertTrue(p.play("bad1"))
+        self.assertTrue(wait_resolved(p))
         self.assertIsNotNone(p.last_error)
+        self.assertIsNone(p.mode)
+        self.assertFalse(p.playing)
 
     def test_next_avanza_cola(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         p.add_queue("v2")
         p.add_queue("v3")
         self.assertTrue(p.next())
@@ -83,6 +104,7 @@ class PlayerCoreTest(unittest.TestCase):
     def test_next_al_final_hace_stop(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         # solo un item -> next no avanza y hace stop
         self.assertFalse(p.next())
         self.assertFalse(p.playing)
@@ -91,6 +113,7 @@ class PlayerCoreTest(unittest.TestCase):
     def test_prev_retrocede(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         p.add_queue("v2")
         p.next()  # idx=1, current=v2
         self.assertTrue(p.prev())
@@ -100,12 +123,14 @@ class PlayerCoreTest(unittest.TestCase):
     def test_prev_en_idx0_no_hace_nada(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         self.assertFalse(p.prev())
         self.assertEqual(p.idx, 0)
 
     def test_toggle_pause(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         self.assertTrue(p.toggle_pause())
         self.assertTrue(p.paused)
         self.assertFalse(p.toggle_pause())
@@ -114,15 +139,29 @@ class PlayerCoreTest(unittest.TestCase):
     def test_stop_limpia_estado(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         p.stop()
         self.assertFalse(p.playing)
         self.assertIsNone(p.current)
         self.assertEqual(p.queue, [])
         self.assertEqual(p.idx, -1)
 
+    def test_stop_durante_resolucion_cancela(self):
+        p = make_player()
+        p.res.stream_fail = False
+        # stop inmediatamente despues del play (la resolucion aun corre)
+        p.play("v1")
+        p.stop()
+        # al terminar el thread, no debe resucitar el estado
+        self.assertTrue(wait_resolved(p))
+        self.assertFalse(p.playing)
+        self.assertIsNone(p.current)
+        self.assertEqual(p.queue, [])
+
     def test_restore_tras_fallo_en_next(self):
         p = make_player()
         p.play("v1")  # idx=0
+        wait_resolved(p)
         p.add_queue("v2")
         p.add_queue("v3")
         p.next()  # idx=1, current=v2
@@ -136,6 +175,7 @@ class PlayerCoreTest(unittest.TestCase):
     def test_remove_indice_antes_de_idx_desplaza(self):
         p = make_player()
         p.play("v1")  # idx=0
+        wait_resolved(p)
         p.add_queue("v2")  # idx=1
         p.add_queue("v3")
         p.next()  # idx=1 (v2)
@@ -146,6 +186,7 @@ class PlayerCoreTest(unittest.TestCase):
     def test_remove_indice_igual_a_idx_reinicia(self):
         p = make_player()
         p.play("v1")  # idx=0
+        wait_resolved(p)
         p.add_queue("v2")
         p.next()  # idx=1 (v2)
         self.assertTrue(p.remove_queue(1))
@@ -156,6 +197,7 @@ class PlayerCoreTest(unittest.TestCase):
     def test_remove_invalido_devuelve_false(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         self.assertFalse(p.remove_queue(10))
         self.assertFalse(p.remove_queue(-1))
         self.assertEqual(len(p.queue), 1)
@@ -163,11 +205,18 @@ class PlayerCoreTest(unittest.TestCase):
     def test_get_state_incluye_cola_y_current(self):
         p = make_player()
         p.play("v1")
+        wait_resolved(p)
         st = p.get_state()
         self.assertTrue(st["ok"] if "ok" in st else True)
-        self.assertEqual(st["queue"], ["v1"] if False else [p.queue[0]])
+        self.assertEqual(st["queue"], [p.queue[0]])
         self.assertEqual(st["current"]["id"], "v1")
         self.assertEqual(st["current_index"], 0)
+
+    def test_get_state_expone_resolving(self):
+        p = make_player()
+        st = p.get_state()
+        self.assertIn("resolving", st)
+        self.assertFalse(st["resolving"])
 
 
 if __name__ == "__main__":

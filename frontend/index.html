@@ -177,9 +177,28 @@ function debouncedSearch() {
 function playV(id) {
   st("Cargando...", "loading")
   api("POST", "/api/play", {video_id: id}).then(function(data) {
-    if (data && data.ok) { state = data; updateUI(); playAudio(); st("Reproduciendo", "success") }
-    else st(data && data.error ? data.error : "Error", "error")
+    if (!data || !data.ok) { st(data && data.error ? data.error : "Error", "error"); return }
+    if (data.resolving) { waitResolved(); return }
+    state = data; updateUI(); playAudio(); st("Reproduciendo", "success")
   })
+}
+
+// El play es asincrono (resolucion de stream en background): poll hasta que
+// resolving=false y el modo este listo, luego conecta el audio.
+function waitResolved() {
+  var tries = 0
+  var t = setInterval(function() {
+    api("GET", "/api/state").then(function(data) {
+      if (!data || !data.ok) { clearInterval(t); st("Error de conexión", "error"); return }
+      if (data.resolving) {
+        if (++tries > 60) { clearInterval(t); st("Timeout al resolver", "error") }
+        return
+      }
+      clearInterval(t)
+      if (data.playing && data.mode) { state = data; updateUI(); playAudio(); st("Reproduciendo", "success") }
+      else st("No se pudo reproducir", "error")
+    })
+  }, 1000)
 }
 
 function addQ(id,title,duration,uploader) {

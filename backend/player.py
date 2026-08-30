@@ -16,6 +16,8 @@ class Player:
         self.current = None
         self.last_error = None
         self._lock = threading.Lock()
+        self._resolving = False  # resolucion async de stream en curso
+        self._cancel_resolve = False
 
     def get_state(self):
         with self._lock:
@@ -23,6 +25,7 @@ class Player:
                 "playing": self.playing,
                 "paused": self.paused,
                 "mode": self.mode,
+                "resolving": self._resolving,
                 "current_index": self.idx,
                 "queue": list(self.queue),
                 "current": dict(self.current) if self.current else None,
@@ -75,17 +78,37 @@ class Player:
         return self._resolve_and_set(t["id"])
 
     def play(self, video_id):
-        if not self._resolve_and_set(video_id):
-            return False
-        track = dict(self.current)
+        """Play ASINCRONO: responde inmediato y resuelve el stream en un thread
+        (la resolucion de yt-dlp tarda ~20s; esperarla en el handler dejaba la
+        UI en 'Cargando...' 20 segundos). El state expone resolving=true hasta
+        que el stream este listo."""
         with self._lock:
+            if self._resolving:
+                return True  # ya resolviendo (mismo video o previo)
+            self._resolving = True
+            self._cancel_resolve = False
+            self.last_error = None
+        threading.Thread(target=self._play_async, args=(video_id,), daemon=True).start()
+        return True
+
+    def _play_async(self, video_id):
+        ok = self._resolve_and_set(video_id)
+        with self._lock:
+            if self._cancel_resolve:
+                # el usuario hizo stop/next durante la resolucion: no resucitar
+                self._resolving = False
+                self._stop_locked()
+                return
+            self._resolving = False
+            if not ok:
+                return
+            track = dict(self.current)
             if not self.queue or self.idx < 0:
                 self.queue = [track]
                 self.idx = 0
             else:
                 self.queue.insert(self.idx + 1, track)
                 self.idx += 1
-        return True
 
     def _stop_locked(self):
         """Detiene la reproduccion. DEBE llamarse con self._lock YA tomado."""
@@ -98,6 +121,8 @@ class Player:
         self.queue = []
         self.idx = -1
         self.last_error = None
+        self._resolving = False
+        self._cancel_resolve = True
 
     def stop(self):
         """Detiene la reproduccion y limpia la cola."""
