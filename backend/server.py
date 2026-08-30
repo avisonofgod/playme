@@ -3,7 +3,7 @@ PlayMe v3 - HTTP Server modular.
 Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
 v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbidden).
 """
-import json, logging, os, re, select, subprocess, threading, time, urllib.request
+import json, logging, os, re, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
 
@@ -43,6 +43,11 @@ player = Player(resolver, transcoder)
 
 MP3_DIR = "/tmp/playme_mp3"
 os.makedirs(MP3_DIR, exist_ok=True)
+
+# Tamano del chunk de streaming cuando el cliente pide un rango abierto
+# (bytes=0-): googlevideo rechaza rangos abiertos (403) y tambien rangos
+# mayores a ~1MB (verificado: 4MB->403, 1MB->206).
+MAX_CHUNK = 1024 * 1024  # 1MB
 
 # ── Converter: descargas mp3 en background ──
 _conv_lock = threading.Lock()
@@ -297,15 +302,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def _proxy(self, url):
         """Proxy de streaming. Envia headers de navegador + cookies para que
-        googlevideo no rechace con 403. Mantiene Range/CL/Content-Range."""
+        googlevideo no rechace con 403. Mantiene Range/CL/Content-Range.
+        googlevideo EXIGE Range CON FIN: rechaza rangos abiertos 'bytes=0-'
+        (403). El navegador manda 'bytes=0-' al iniciar -> se convierte a un
+        chunk con fin (bytes=0-<MAX_CHUNK-1>)."""
         range_h = self.headers.get("Range", "")
+        upstream_range = range_h if range_h else "bytes=0-"
+        if upstream_range.endswith("-"):
+            start_str = upstream_range[len("bytes="):-1]
+            try:
+                start = int(start_str) if start_str else 0
+            except ValueError:
+                start = 0
+            upstream_range = f"bytes={start}-{start + MAX_CHUNK - 1}"
         try:
-            req = build_stream_request(url, range_h)
+            req = build_stream_request(url, upstream_range)
             resp = urllib.request.urlopen(req, timeout=10)
             ct = resp.headers.get("Content-Type", "audio/webm")
             cl = resp.headers.get("Content-Length")
             cr = resp.headers.get("Content-Range", "")
-            st = 206 if range_h and resp.status == 206 else 200
+            st = 206 if resp.status == 206 else 200
             self.send_response(st)
             self.send_header("Content-Type", ct)
             self.send_header("Cache-Control", "no-cache")
@@ -317,13 +333,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Content-Range", cr)
             self.end_headers()
             while True:
-                r, _, _ = select.select([resp.fp], [], [], 30)
-                if not r: break
-                c = resp.read(65536)
-                if not c: break
+                # Lectura directa: select.select([resp.fp]) falla en Python 3.13
+                # (resp.fp de urllib no tiene fileno()) y cortaba el stream tras
+                # el primer chunk. El read bloqueante termina solo: b'' si el
+                # upstream corta, BrokenPipe si el cliente cierra.
+                try:
+                    c = resp.read(65536)
+                except Exception:
+                    break
+                if not c:
+                    break
                 try:
                     self.wfile.write(c); self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError): break
+                except (BrokenPipeError, ConnectionResetError):
+                    break
             resp.close()
         except Exception as e:
             logger.error(f"proxy error: {e}")
