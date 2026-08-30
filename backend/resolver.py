@@ -1,7 +1,11 @@
 """
 Resolver: busca en YouTube y obtiene URLs de audio via yt-dlp.
+Refactor: usa runner.run_command (inyectable) en lugar de subprocess directo,
+permitiendo tests sin red ni YouTube.
 """
-import json, logging, os, subprocess, threading, shutil, tempfile
+import json, logging, os, shutil, tempfile, threading
+
+from runner import run_command
 
 logger = logging.getLogger(__name__)
 # cookies.txt = fuente viva (TokenManager la mantiene con SAPISID).
@@ -10,23 +14,33 @@ COOKIES_LIVE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies
 COOKIES_BACKUP = os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies_master.txt")
 COOKIES_TEMP = os.path.join(tempfile.gettempdir(), "playme_cookies.txt")
 
+
 class Resolver:
-    def __init__(self):
+    def __init__(self, runner=None):
         self.ytdlp = "yt-dlp"
         self._sem = threading.Semaphore(1)  # solo un yt-dlp a la vez
         self.last_error = None  # causa real del ultimo fallo (para exponerla en /api/play)
         self._cookie_lock = threading.Lock()  # protege _sync_cookies de acceso concurrente
+        self._runner = runner or run_command  # inyectable para tests
         self._sync_cookies()  # copia inicial
+
+    def _run(self, args, timeout=None, check=False):
+        """Ejecuta un comando via runner. Retorna CompletedProcess con .returncode,
+        .stdout, .stderr. Lanza si runner lo permite y check=True."""
+        return self._runner(args, timeout=timeout, check=check, capture_output=True)
 
     def _sync_cookies(self):
         """Copia cookies viva a temp para que yt-dlp no sobrescriba el original.
-        Usa lock para evitar race si varios hilos (stream + conv) copian a la vez."""
+        Usa lock para evitar race si varios hilos (stream + conv) copian a la vez.
+        Si TEMP y LIVE son el mismo archivo (tests), evita SameFileError."""
         with self._cookie_lock:
             src = COOKIES_LIVE
             if not (os.path.isfile(src) and os.path.getsize(src) > 0):
                 src = COOKIES_BACKUP
+            dst = COOKIES_TEMP
             if os.path.isfile(src) and os.path.getsize(src) > 0:
-                shutil.copy2(src, COOKIES_TEMP)
+                if os.path.abspath(src) != os.path.abspath(dst):
+                    shutil.copy2(src, dst)
 
     def _args(self, extra=None):
         self._sync_cookies()  # asegura copia fresca antes de cada comando
@@ -40,7 +54,9 @@ class Resolver:
     def _err_tail(self, err_bytes):
         """Ultima linea util del stderr de yt-dlp (sin WARNINGs)."""
         try:
-            lines = [l for l in err_bytes.decode(errors="replace").splitlines() if l.strip()]
+            if isinstance(err_bytes, bytes):
+                err_bytes = err_bytes.decode(errors="replace")
+            lines = [l for l in err_bytes.splitlines() if l.strip()]
             for l in reversed(lines):
                 if l.startswith("ERROR"):
                     return l
@@ -49,20 +65,16 @@ class Resolver:
             return ""
 
     def search(self, query, limit=10, tipo="video"):
-        """Busca en YouTube. tipo: video (default), channel, playlist"""
+        """Busca en YouTube. tipo: video (default), channel, playlist."""
         try:
-            if tipo == "channel":
-                # Buscar canal y listar sus videos
-                search_query = f"ytsearch{limit}:{query}"
-            elif tipo == "playlist":
-                # Si query es un ID de playlist, listarla directamente
+            if tipo == "playlist":
                 if query.startswith("PL") or query.startswith("RD") or len(query) == 34:
                     try:
-                        out = subprocess.check_output(
+                        r = self._run(
                             self._args(["--flat-playlist", "-J", f"https://www.youtube.com/playlist?list={query}"]),
-                            stderr=subprocess.DEVNULL, timeout=20
-                        ).decode()
-                        data = json.loads(out)
+                            timeout=20, check=True,
+                        )
+                        data = json.loads(r.stdout)
                         return [{
                             "id": e.get("id", ""),
                             "title": e.get("title", "?"),
@@ -71,19 +83,17 @@ class Resolver:
                             "thumbnail": e.get("thumbnail", "")
                         } for e in data.get("entries", [])]
                     except Exception as e:
-                        # Playlist invalida: degradar a busqueda por nombre
                         logger.warning(f"playlist direct fail {query}: {e}")
                         query = query + " playlist"
-                # Buscar playlist por nombre
                 search_query = f"ytsearch{limit}:{query}"
             else:
                 search_query = f"ytsearch{limit}:{query}"
 
-            out = subprocess.check_output(
+            r = self._run(
                 self._args(["--flat-playlist", "-J", search_query]),
-                stderr=subprocess.DEVNULL, timeout=20
-            ).decode()
-            data = json.loads(out)
+                timeout=20, check=True,
+            )
+            data = json.loads(r.stdout)
             return [{
                 "id": e.get("id", ""),
                 "title": e.get("title", "?"),
@@ -97,26 +107,17 @@ class Resolver:
 
     def get_info(self, video_id):
         """Obtiene metadata completa. Intenta primero full -J (duration/thumbnail),
-        y si falla, degrada a flat. Timeout 8s total."""
+        y si falla, degrada a flat."""
         url = f"https://www.youtube.com/watch?v={video_id}"
-        # Primer intento: metadata completa (necesaria para duration/thumbnail)
         try:
-            out = subprocess.check_output(
-                self._args(["-J", "--format", "bestaudio", url]),
-                stderr=subprocess.DEVNULL, timeout=8
-            ).decode()
-            return json.loads(out)
-        except:
+            r = self._run(self._args(["-J", "--format", "bestaudio", url]), timeout=8, check=True)
+            return json.loads(r.stdout)
+        except Exception:
             pass
-        # Fallback: flat (solo id/titulo)
         try:
-            out = subprocess.check_output(
-                self._args(["--flat-playlist", "-J", url]),
-                stderr=subprocess.DEVNULL, timeout=6
-            ).decode()
-            data = json.loads(out)
-            return data
-        except:
+            r = self._run(self._args(["--flat-playlist", "-J", url]), timeout=6, check=True)
+            return json.loads(r.stdout)
+        except Exception:
             return None
 
     def get_stream_url(self, video_id):
@@ -124,7 +125,7 @@ class Resolver:
         url = f"https://www.youtube.com/watch?v={video_id}"
         self.last_error = None
         strategies = [
-            {"f": "251/bestaudio", "e": None},  # default (ANDROID_VR en yt-dlp moderno)
+            {"f": "251/bestaudio", "e": None},
             {"f": "251/bestaudio", "e": "youtube:player_client=tv"},
             {"f": "251/bestaudio", "e": "youtube:player_client=web_embedded"},
             {"f": "bestaudio", "e": "youtube:player_client=mweb"},
@@ -136,22 +137,18 @@ class Resolver:
                 if s["e"]:
                     args += ["--extractor-args", s["e"]]
                 args.append(url)
-                r = subprocess.run(args, capture_output=True, timeout=10)
+                r = self._run(args, timeout=10)
                 if r.returncode == 0:
-                    out = r.stdout.decode(errors="replace").strip()
+                    out = (r.stdout or b"").decode(errors="replace").strip()
                     if out:
                         line = out.splitlines()[-1]
                         if line.startswith("http"):
                             self.last_error = None
                             return line
-                # guardar la causa del fallo (ultima linea ERROR)
                 err = self._err_tail(r.stderr)
                 if err:
                     self.last_error = err
-            except subprocess.TimeoutExpired:
-                self.last_error = f"yt-dlp timeout (10s) para {video_id}"
             except Exception as e:
                 self.last_error = str(e)
-        # todas las estrategias fallaron: loggear la causa real para diagnostico
         logger.warning(f"no stream for {video_id}: {self.last_error}")
         return None

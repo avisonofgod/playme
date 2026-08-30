@@ -2,14 +2,18 @@
 Transcoder: descarga audio a cache con yt-dlp.
 Eliminado: no usa mpv, no tiene stop() bloqueante.
 Bugfix: usa archivo .part para descarga -> evita tratar parcial como cached.
+Refactor: usa runner.run_command inyectable.
 """
-import logging, os, subprocess, threading, time
+import logging, os, threading, time
+
+from runner import run_command
 
 logger = logging.getLogger(__name__)
 CACHE = "/tmp/playme_cache"
 
 class Transcoder:
-    def __init__(self):
+    def __init__(self, runner=None):
+        self._runner = runner or run_command
         os.makedirs(CACHE, exist_ok=True)
 
     def path(self, vid):
@@ -39,7 +43,7 @@ class Transcoder:
             "--no-part", "--no-mtime", url
         ]
         try:
-            subprocess.run(args, capture_output=True, text=True, timeout=120)
+            self._runner(args, timeout=120)
             if os.path.isfile(part) and os.path.getsize(part) > 0:
                 os.rename(part, self.path(vid))
                 logger.info(f"cache ok: {vid} ({self.size(vid)} bytes)")

@@ -87,12 +87,31 @@ class Player:
                 self.idx += 1
         return True
 
+    def _stop_locked(self):
+        """Detiene la reproduccion. DEBE llamarse con self._lock YA tomado."""
+        self.playing = False
+        self.paused = False
+        self.mode = None
+        self.stream_url = None
+        self.cache_path = None
+        self.current = None
+        self.queue = []
+        self.idx = -1
+        self.last_error = None
+
+    def stop(self):
+        """Detiene la reproduccion y limpia la cola."""
+        with self._lock:
+            self._stop_locked()
+
     def next(self):
         with self._lock:
             if self.idx < len(self.queue) - 1:
                 self.idx += 1
             else:
-                self.stop()
+                # ultimo elemento: detener bajo el lock ya tomado (evita deadlock
+                # por stop() que re-adquiriria self._lock).
+                self._stop_locked()
                 return False
         ok = self._play_current()
         if not ok:
@@ -120,18 +139,6 @@ class Player:
     def toggle_pause(self):
         self.paused = not self.paused
         return self.paused
-
-    def stop(self):
-        with self._lock:
-            self.playing = False
-            self.paused = False
-            self.mode = None
-            self.stream_url = None
-            self.cache_path = None
-            self.current = None
-            self.queue = []
-            self.idx = -1
-            self.last_error = None
 
     def add_queue(self, video_id, title=None, duration=0, uploader=""):
         track = {
