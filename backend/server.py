@@ -1,12 +1,6 @@
-"""
-PlayMe v3 - HTTP Server modular.
-Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
-v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbidden).
-v5-fix-selec: streaming sin select.select (Python 3.13 fp sin fileno).
-v6-robustez: rate limiting por IP, limite de conversions, metadata en queue/add,
-             y kill de grupo en timeouts (runner).
-v8-ip: endpoint /api/ip (deteccion ip publica con cache). en backend (sanitize_filename como
-             unica fuente de verdad; el frontend delega en Content-Disposition).
+"""PlayMe - Servidor HTTP modular de streaming de audio.
+Endpoints: estado, reproduccion, cola, busqueda, conversor mp3, deteccion de IP.
+Arquitectura modular con rate-limiting por IP; streaming en proxy respeta HTTP Range.
 """
 import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
