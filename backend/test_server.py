@@ -124,32 +124,32 @@ class ServerValidationTest(unittest.TestCase):
         self.assertNotIn("\n", inner)
 
 
-if __name__ == "__main__":
-    unittest.main()
+
+class IpEndpointTest(unittest.TestCase):
+    def _ip_valida(self, ip):
+        if not ip or not isinstance(ip, str):
+            return False
+        partes = ip.split(".")
+        if len(partes) != 4:
+            return False
+        for x in partes:
+            if not x.isdigit():
+                return False
+            if not (0 <= int(x) <= 255):
+                return False
+        return True
 
     def test_ip_endpoint_responde(self):
-        """GET /api/ip devuelve una IP de formato valido (usa fallback sin red)."""
+        """GET /api/ip responde JSON con ip de formato valido (sin red)."""
         import server as srv
-        handler = make_handler()
-        handler.path = "/api/ip"
-        handler.command = "GET"
-        handler.do_GET()
-        body = handler._captured_body.decode() if handler._captured_body else "{}"
-        import json as _j
-        d = _j.loads(body)
+        handler, state = make_handler("/api/ip", headers={})
+        with mock.patch.object(srv, "_detect_public_ip", return_value="127.0.0.1"):
+            handler.do_GET()
+        body = state["buffer"].getvalue().decode()
+        d = json.loads(body)
         self.assertTrue(d.get("ok"))
-        self.assertTrue(_ip_valida(d.get("ip")))
+        self.assertTrue(self._ip_valida(d.get("ip")))
 
 
-def _ip_valida(ip):
-    if not ip or not isinstance(ip, str):
-        return False
-    partes = ip.split(".")
-    if len(partes) != 4:
-        return False
-    for x in partes:
-        if not x.isdigit():
-            return False
-        if not (0 <= int(x) <= 255):
-            return False
-    return True
+if __name__ == "__main__":
+    unittest.main()

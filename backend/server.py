@@ -388,7 +388,14 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_file(cpath)
         elif mode == "proxy":
             vid = player.current.get("id") if player.current else ""
-            self._proxy_ytdlp(vid)
+            # Si ya hay URL resuelta (googlevideo) usamos _proxy(): respeta el
+            # Range del cliente (206 + Content-Range) -> el seek funciona y no
+            # se descarga el video completo por cada peticion. _proxy_ytdlp
+            # queda como respaldo cuando aun no hay URL resuelta.
+            if surl:
+                self._proxy(surl)
+            else:
+                self._proxy_ytdlp(vid)
         else:
             self._send(*err_res("No stream", 404))
 
@@ -649,7 +656,7 @@ def main():
         daemon_threads = True
 
     server = Threaded(("0.0.0.0", PORT), Handler)
-    logger.info(f"PlayMe v7-filename en http://0.0.0.0:{PORT}")
+    logger.info(f"PlayMe v9-proxy-range en http://0.0.0.0:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
