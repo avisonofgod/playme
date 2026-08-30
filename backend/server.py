@@ -5,7 +5,7 @@ v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbid
 v5-fix-selec: streaming sin select.select (Python 3.13 fp sin fileno).
 v6-robustez: rate limiting por IP, limite de conversions, metadata en queue/add,
              y kill de grupo en timeouts (runner).
-v7-filename: nombre de archivo mp3 unificado en backend (sanitize_filename como
+v8-ip: endpoint /api/ip (deteccion ip publica con cache). en backend (sanitize_filename como
              unica fuente de verdad; el frontend delega en Content-Disposition).
 """
 import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
@@ -91,6 +91,49 @@ def _cleanup_rates():
                      if not hits or (now - max(hits)) > _RATE_INACTIVE_SEC]
             for ip in stale:
                 del cfg["hits"][ip]
+
+
+# ── Deteccion de IP publica (con cache) para /api/ip y el cliente Android ──
+_PUBLIC_IP = {"ip": None, "t": 0.0}
+_PUBLIC_IP_CACHE_SEC = 600  # refrescar si > 10 min
+
+
+def _detect_public_ip():
+    """Devuelve la IP publica del servidor (api.ipify.org, timeout corto).
+    Cachea en memoria; refresca tras _PUBLIC_IP_CACHE_SEC. Fallback: IP local
+    LAN via socket, y si nada, '127.0.0.1'. Nunca bloquea el server."""
+    now = time.time()
+    if _PUBLIC_IP["ip"] and (now - _PUBLIC_IP["t"]) < _PUBLIC_IP_CACHE_SEC:
+        return _PUBLIC_IP["ip"]
+    ip = None
+    try:
+        with urllib.request.urlopen("https://api.ipify.org", timeout=3) as r:
+            txt = r.read().decode().strip()
+            if txt and re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", txt):
+                ip = txt
+    except Exception:
+        ip = None
+    if not ip:
+        ip = _local_lan_ip()
+    if not ip:
+        ip = "127.0.0.1"
+    _PUBLIC_IP["ip"] = ip
+    _PUBLIC_IP["t"] = now
+    return ip
+
+
+def _local_lan_ip():
+    """IP local LAN via socket UDP connect (no envia trafico real)."""
+    try:
+        import socket as _s
+        s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
 
 
 # ── Converter: descargas mp3 en background ──
@@ -279,6 +322,8 @@ class Handler(BaseHTTPRequestHandler):
                     convs = dict(_conversions)
                 state["conversions"] = {k: {"status": v["status"]} for k, v in convs.items()}
                 self._send(*json_res({"ok": True, **state}))
+            elif path == "/api/ip":
+                self._send(*json_res({"ok": True, "ip": _detect_public_ip()}))
             elif path == "/api/stream":
                 self._handle_stream()
             elif path.startswith("/api/download/mp3/"):
