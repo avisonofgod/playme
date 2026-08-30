@@ -3,7 +3,7 @@ PlayMe v3 - HTTP Server modular.
 Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
 v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbidden).
 """
-import json, logging, os, re, subprocess, threading, time, urllib.request
+import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
 
@@ -263,10 +263,53 @@ class Handler(BaseHTTPRequestHandler):
             cpath = player.cache_path
         if mode == "file" and cpath and os.path.exists(cpath):
             self._serve_file(cpath)
-        elif mode == "proxy" and surl:
-            self._proxy(surl)
+        elif mode == "proxy":
+            # googlevideo solo sirve el primer MB (rango desde 0, max ~1MB):
+            # el proxy HTTP plano se cortaba al segundo chunk (403) y el audio
+            # moria a 1MB. yt-dlp a stdout maneja el stream completo.
+            vid = player.current.get("id") if player.current else ""
+            self._proxy_ytdlp(vid)
         else:
             self._send(*err_res("No stream", 404))
+
+    def _proxy_ytdlp(self, video_id):
+        """Streaming via yt-dlp a stdout (subprocess). El navegador recibe el
+        audio completo sin cortes (googlevideo rechaza chunks >1MB y rangos
+        que no empiezan en 0). Sin seek (Content-Length desconocida, conexion
+        se cierra al terminar) pero reproduccion continua fiable."""
+        if not video_id:
+            self._send(*err_res("No stream", 404))
+            return
+        # ruta absoluta: el PATH del proceso server puede no incluir /usr/local/bin
+        ytdlp = shutil.which("yt-dlp") or "/usr/local/bin/yt-dlp"
+        cmd = [
+            ytdlp, "--cookies", COOKIES_PATH, "--no-playlist",
+            "-f", "bestaudio[ext=m4a]/bestaudio",
+            "-o", "-",
+            f"https://www.youtube.com/watch?v={video_id}",
+        ]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            logger.error(f"ytdlp spawn: {e}")
+            self._send(*err_res("Stream error", 502))
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mp4")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        try:
+            while True:
+                c = proc.stdout.read(65536)
+                if not c:
+                    break
+                self.wfile.write(c)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            proc.kill()  # el cliente corto: no seguir descargando
+            proc.wait()
 
     def _serve_file(self, path):
         sz = os.path.getsize(path)

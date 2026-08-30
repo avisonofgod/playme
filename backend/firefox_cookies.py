@@ -60,13 +60,21 @@ class FirefoxCookiesExtractor:
 
     # ── helpers ────────────────────────────────────────────────────────────
     def _snapshot(self):
-        """Copia la db del perfil (en uso) a un archivo temporal seguro."""
+        """Copia la db del perfil (en uso) a un archivo temporal seguro.
+
+        Copia TAMBIEN el -wal: Firefox corriendo escribe las cookies recientes
+        en cookies.sqlite-wal (el SID rotado); copiar solo el main las pierde
+        -> cookies.txt sin SID/HSID -> yt-dlp 'cookies no validas' -> 403."""
         if not (os.path.isfile(self.profile_db) and os.path.getsize(self.profile_db) > 0):
             return None
         dst = os.path.join(self._tmpdir, "playme_firefox_cookies.sqlite")
         try:
             self._copy(self.profile_db, dst)
             os.chmod(dst, 0o600)
+            wal = self.profile_db + "-wal"
+            if os.path.isfile(wal) and os.path.getsize(wal) > 0:
+                self._copy(wal, dst + "-wal")
+                os.chmod(dst + "-wal", 0o600)
             return dst
         except OSError as e:
             logger.warning("No se pudo copiar cookies.sqlite: %s", e)
