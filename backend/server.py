@@ -5,6 +5,8 @@ v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbid
 v5-fix-selec: streaming sin select.select (Python 3.13 fp sin fileno).
 v6-robustez: rate limiting por IP, limite de conversions, metadata en queue/add,
              y kill de grupo en timeouts (runner).
+v7-filename: nombre de archivo mp3 unificado en backend (sanitize_filename como
+             unica fuente de verdad; el frontend delega en Content-Disposition).
 """
 import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -102,15 +104,7 @@ def _evict_conversions():
     NUNCA evicta una en curso (status converting/downloading)."""
     with _conv_lock:
         while len(_conversions) > _MAX_CONVERSIONS:
-            # entradas terminadas, ordenadas por antiguedad de insercion
-            done = [(k, v) for k, v in _conversions.items()
-                    if v.get("status") in ("ready", "error")]
-            if not done:
-                break  # todas en curso: no forzar eviction
-            done.sort(key=lambda kv: 0)  # insert order via _order
             oldest = None
-            # _conversions no tiene orden de insercion nativo; usamos un orden
-            # estable por el orden de insercion del dict (Python 3.7+)
             for k in list(_conversions.keys()):
                 if _conversions[k].get("status") in ("ready", "error"):
                     oldest = k
@@ -151,6 +145,21 @@ def build_stream_request(url, range_h):
     if range_h:
         req.add_header("Range", range_h)
     return req
+
+
+def sanitize_filename(title, video_id):
+    """Regla UNICA de nombre de archivo descargado (fuente de verdad del backend).
+    Usa la antigua regla de _serve_mp3, ahora expuesta y reutilizable.
+    Devuelve siempre algo (fallback video_id)."""
+    fname = (title or "").strip()
+    if not fname:
+        fname = video_id
+    fname = fname[:30].replace("/", "-").replace(" ", "-")
+    fname = "".join(c for c in fname if c.isalnum() or c in "._- ") or video_id
+    fname = fname.strip().replace(" ", "-")
+    # quitar comillas, punto-coma y backslash que romperian el header
+    fname = fname.replace('"', "").replace(";", "").replace(chr(92), "-")
+    return fname + ".mp3"
 
 
 def _run_conv(video_id):
@@ -283,23 +292,16 @@ class Handler(BaseHTTPRequestHandler):
             except: pass
 
     def _serve_mp3(self, video_id):
-        """Sirve archivo mp3 si ya existe."""
-        # Extraer title del query string si existe
-        import urllib.parse
-        parsed = urllib.parse.urlparse(self.path)
-        qs = urllib.parse.parse_qs(parsed.query)
-        title = qs.get("title", [None])[0]
+        """Sirve archivo mp3 si ya existe. El nombre viene de la unica fuente
+        de verdad: sanitize_filename() sobre el title de _conversions."""
+        with _conv_lock:
+            conv = _conversions.get(video_id, {})
+        title = conv.get("title")
 
         mp3 = os.path.join(MP3_DIR, f"{video_id}.mp3")
         if os.path.isfile(mp3):
             sz = os.path.getsize(mp3)
-            fname = title if title else video_id
-            # Limpiar nombre: 30 chars, solo caracteres seguros (escapar comillas/punto-coma)
-            fname = fname[:30].replace("/", "-").replace(" ", "-")
-            fname = "".join(c for c in fname if c.isalnum() or c in "._- ") or video_id
-            fname = fname.strip().replace(" ", "-") + ".mp3"
-            # sanear: quitar comillas, punto-coma y backslash que romperian el header
-            fname = fname.replace('"', "").replace(";", "").replace(chr(92), "-")
+            fname = sanitize_filename(title, video_id)
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")
             self.send_header("Content-Length", str(sz))
@@ -602,7 +604,7 @@ def main():
         daemon_threads = True
 
     server = Threaded(("0.0.0.0", PORT), Handler)
-    logger.info(f"PlayMe v6-robustez en http://0.0.0.0:{PORT}")
+    logger.info(f"PlayMe v7-filename en http://0.0.0.0:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

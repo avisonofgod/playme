@@ -295,8 +295,8 @@ function renderDl(convs) {
       + '<span style="flex:1;font-size:0.75em;color:#889">'+idShort+'</span>'
       + '<span style="flex:0 0 60px;text-align:center">'
     if (c.status==="ready") {
-      var fname = (c.title || id).substring(0, 30).replace(/[^a-zA-Z0-9 _-]/g, "").replace(/ /g, "-") + ".mp3"
-      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'?title='+encodeURIComponent(c.title||id)+'" download="'+fname+'">⬇</a>'
+      // Sin ?title= ni download=: el backend define el nombre via Content-Disposition
+      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'">⬇</a>'
     } else if (c.status==="error") {
       h += '<span class="dl-err">Error</span>'
     } else {
@@ -306,6 +306,7 @@ function renderDl(convs) {
   }
   el.innerHTML=h
 }
+
 
 function poll() {
   api("GET","/api/state").then(function(data) {
