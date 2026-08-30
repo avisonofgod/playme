@@ -1,6 +1,7 @@
 """
 PlayMe v3 - HTTP Server modular.
 Bugfix: lock real en _handle_stream; CL correcto en proxy con Range; lock en _run_conv.
+v4-fix403: proxy envia headers de navegador + cookies (googlevideo -> 403 Forbidden).
 """
 import json, logging, os, re, select, subprocess, threading, time, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -10,10 +11,12 @@ from resolver import Resolver
 from token_manager import TokenManager
 from transcoder import Transcoder
 from player import Player
+from cookie_parser import build_cookie_header
 
 PORT = int(os.environ.get("PORT", "8090"))
 STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 os.makedirs(log_dir, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +24,17 @@ logging.basicConfig(
     handlers=[logging.FileHandler(os.path.join(log_dir, "playme.log")), logging.StreamHandler()],
 )
 logger = logging.getLogger("playme")
+
+# cookies.txt = raiz del proyecto (fuente viva mantenida por TokenManager)
+COOKIES_PATH = os.path.join(PROJECT_ROOT, "cookies.txt")
+
+# Headers de navegador para que googlevideo no rechace con 403 los proxys.
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+    "Referer": "https://www.youtube.com/",
+    "Origin": "https://www.youtube.com",
+    "Accept": "*/*",
+}
 
 resolver = Resolver()
 token_mgr = TokenManager()
@@ -52,6 +66,17 @@ def _scan_existing_mp3():
                 _conversions[vid] = {"status": "ready", "title": tit}
 
 _scan_existing_mp3()
+
+def build_stream_request(url, range_h):
+    """Construye un urllib.Request con headers de navegador + cookies para
+    googlevideo. Anade Range si viene de un request parcial."""
+    req = urllib.request.Request(url, headers=dict(BROWSER_HEADERS))
+    cookie_hdr = build_cookie_header(COOKIES_PATH)
+    if cookie_hdr:
+        req.add_header("Cookie", cookie_hdr)
+    if range_h:
+        req.add_header("Range", range_h)
+    return req
 
 def _run_conv(video_id):
     logger.info(f"Conv running: {video_id}")
@@ -271,10 +296,11 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError): pass
 
     def _proxy(self, url):
+        """Proxy de streaming. Envia headers de navegador + cookies para que
+        googlevideo no rechace con 403. Mantiene Range/CL/Content-Range."""
         range_h = self.headers.get("Range", "")
         try:
-            req = urllib.request.Request(url)
-            if range_h: req.add_header("Range", range_h)
+            req = build_stream_request(url, range_h)
             resp = urllib.request.urlopen(req, timeout=10)
             ct = resp.headers.get("Content-Type", "audio/webm")
             cl = resp.headers.get("Content-Length")
@@ -410,7 +436,7 @@ def main():
         daemon_threads = True
 
     server = Threaded(("0.0.0.0", PORT), Handler)
-    logger.info(f"PlayMe v3 en http://0.0.0.0:{PORT}")
+    logger.info(f"PlayMe v4-fix403 en http://0.0.0.0:{PORT}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
