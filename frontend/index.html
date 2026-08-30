@@ -90,6 +90,7 @@ var state = {}
 var audio = null
 var pt = null
 var dlTimer = null
+var offline = false
 
 function $(id) { return document.getElementById(id) }
 function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML }
@@ -145,6 +146,7 @@ function updateUI() {
   } else qd.style.display="none"
 }
 
+var searchTimer = null
 function doSearch() {
   var q = $("q").value.trim(); if (!q) return
   $("searchBtn").disabled=true; st("Buscando...","loading")
@@ -165,6 +167,11 @@ function doSearch() {
       el.innerHTML=html; st("")
     } else st("Error","error")
   })
+}
+// Debounce de búsqueda (250ms): evita disparos duplicados al pulsar Enter repetido
+function debouncedSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(doSearch, 250)
 }
 
 function playV(id) {
@@ -284,10 +291,14 @@ function renderDl(convs) {
 function poll() {
   api("GET","/api/state").then(function(data) {
     if (data && data.ok) {
+      if (offline) { offline = false; st("Listo","success") } // recuperado
       var oid=state.current?state.current.id:null, wp=state.playing
       state=data; updateUI()
       if (data.playing&&data.current&&data.current.id!==oid) playAudio()
       else if (!data.playing&&wp) { if (audio) { audio.pause(); audio.src=""; audio.load() } }
+    } else if (data === null) {
+      // Red caída / servidor apagado: marca estado offline y evita UI congelada
+      if (!offline) { offline = true; st("Sin conexión","error") }
     }
   })
 }
@@ -313,8 +324,9 @@ document.addEventListener("click", function(e) {
 })
 
 document.addEventListener("keydown",function(e) {
-  if (e.code==="Space"&&e.ctrlKey){e.preventDefault();toggleP()}
-  if (e.code==="Enter"&&document.activeElement===$("q")){e.preventDefault();doSearch()}
+  // e.repeat: evita toggles repetidos de play/pause al mantener pulsada la barra
+  if (e.code==="Space"&&e.ctrlKey&&!e.repeat){e.preventDefault();toggleP()}
+  if (e.code==="Enter"&&document.activeElement===$("q")&&!e.repeat){e.preventDefault();debouncedSearch()}
 })
 
 document.addEventListener("DOMContentLoaded",function(){startPolling();poll()})
