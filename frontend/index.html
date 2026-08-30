@@ -56,6 +56,13 @@ button > *{pointer-events:none}
 .ruleta::before,.ruleta::after{content:"";position:sticky;display:block;height:12px;z-index:1;pointer-events:none}
 .ruleta::before{top:0;background:linear-gradient(to bottom,rgba(13,13,13,1),rgba(13,13,13,0))}
 .ruleta::after{bottom:0;background:linear-gradient(to top,rgba(13,13,13,1),rgba(13,13,13,0));margin-top:-12px}
+/* ── Feedback verde: fila activa y flash de boton ── */
+#results .r.active{background:rgba(68,189,50,0.13);border-left:3px solid #44bd32}
+#results .r.active .rt{color:#57e389}
+#dlList .dl-item.active{background:rgba(68,189,50,0.13)}
+#dlList .dl-item.active .dt{color:#57e389}
+button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-color:#44bd32!important;background:#44bd32!important}
+
 </style>
 </head>
 <body>
@@ -101,6 +108,12 @@ var offline = false
 function $(id) { return document.getElementById(id) }
 function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML }
 function dur(sec) { if (!sec || sec <= 0) return "?:??"; var m = Math.floor(sec/60), n = Math.floor(sec%60); return m + ":" + (n<10?"0":"") + n }
+function flash(btn) { if (!btn || !btn.classList) return; btn.classList.add("g"); setTimeout(function(){ btn.classList.remove("g") }, 600) }
+function syncActiveRows() {
+  var rows = document.querySelectorAll("#results .r"), cid = state.current ? state.current.id : null
+  for (var i=0;i<rows.length;i++) { if (rows[i].dataset.id === cid) rows[i].classList.add("active"); else rows[i].classList.remove("active") }
+}
+
 function st(msg, type) { var e = $("status"); e.textContent = msg; e.className = "status" + (type ? " " + type : "") }
 
 function switchTab(name) {
@@ -165,7 +178,7 @@ function doSearch() {
       for (var i=0;i<data.results.length;i++) {
         var v=data.results[i], tit=esc(v.title)
         if (tit.length>50) tit=tit.substring(0,47)+"..."
-        html += '<div class="r"><div class="ri"><div class="rt" title="'+esc(v.title)+'">'+tit+'</div><div class="rm">'+esc(v.id)+" · "+esc(v.uploader)+" · "+dur(v.duration)+'</div></div>'
+        html += '<div class="r" data-id="'+esc(v.id)+'"><div class="ri"><div class="rt" title="'+esc(v.title)+'">'+tit+'</div><div class="rm">'+esc(v.id)+" · "+esc(v.uploader)+" · "+dur(v.duration)+'</div></div>'
          +'<button class="rp" data-id="'+esc(v.id)+'">▶</button>'
          +'<button class="ra" data-id="'+esc(v.id)+'" data-tit="'+esc(v.title)+'" data-dur="'+(v.duration||0)+'" data-up="'+esc(v.uploader||"")+'">+</button>'
          +'<button class="rd" data-id="'+esc(v.id)+'" data-tit="'+esc(v.title)+'">DW</button></div>'
@@ -319,7 +332,7 @@ function poll() {
     if (data && data.ok) {
       if (offline) { offline = false; st("Listo","success") } // recuperado
       var oid=state.current?state.current.id:null, wp=state.playing
-      state=data; updateUI()
+      state=data; updateUI(); syncActiveRows()
       if (data.playing&&data.current&&data.current.id!==oid) playAudio()
       else if (!data.playing&&wp) { if (audio) { audio.pause(); audio.src=""; audio.load() } }
     } else if (data === null) {
@@ -334,9 +347,9 @@ function startPolling() { if (pt) clearInterval(pt); pt=setInterval(poll,2000) }
 // ── Events ──
 document.addEventListener("click", function(e) {
   var t=e.target
-  if (t.classList.contains("rp")) { e.stopPropagation(); playV(t.dataset.id); return }
-  if (t.classList.contains("ra")) { e.stopPropagation(); addQ(t.dataset.id,t.dataset.tit,parseInt(t.dataset.dur)||0,t.dataset.up); return }
-  if (t.classList.contains("rd")) { e.stopPropagation(); dwVideo(t.dataset.id,t.dataset.tit); return }
+  if (t.classList.contains("rp")) { e.stopPropagation(); flash(t); playV(t.dataset.id); return }
+  if (t.classList.contains("ra")) { e.stopPropagation(); flash(t); addQ(t.dataset.id,t.dataset.tit,parseInt(t.dataset.dur)||0,t.dataset.up); return }
+  if (t.classList.contains("rd")) { e.stopPropagation(); flash(t); dwVideo(t.dataset.id,t.dataset.tit); return }
   if (t.classList.contains("qd")) { e.stopPropagation(); remQ(parseInt(t.dataset.i)); return }
   var id=t.id||(t.parentElement&&t.parentElement.id)
   if (id==="playBtn"){toggleP();return}
