@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
             }
             // b) local
             String local = "http://127.0.0.1:" + PORT;
-            if (responds(local + "/")) {
+            if (responds(local)) {
                 saveAndLoad(local);
                 return;
             }
@@ -86,7 +86,7 @@ public class MainActivity extends Activity {
             String publicIp = publicIp();
             if (publicIp != null) {
                 String cand = "http://" + publicIp + ":" + PORT;
-                if (responds(cand + "/")) {
+                if (responds(cand)) {
                     saveAndLoad(cand);
                     return;
                 }
