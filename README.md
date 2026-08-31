@@ -9,7 +9,7 @@
 ```
 Playme/
 ├── backend/
-│   ├── server.py              # HTTP Server + API REST (PlayMeHandler) + Conversor mp3
+│   ├── server.py              # HTTP Server + API REST (Handler) + Conversor mp3
 │   ├── player.py              # Lógica de negocio: cola, reproducción, next/prev
 │   ├── resolver.py            # yt-dlp wrapper (búsqueda, stream URL, metadata)
 │   ├── transcoder.py          # mpv wrapper (caché webm en background)
@@ -41,7 +41,7 @@ Playme/
              │ HTTP (GET/POST)
              ▼
 ┌─────────────────────────────────────────────────────┐
-│  PlayMeHandler (ThreadedHTTPServer — puerto 8090)    │
+│  Handler (ThreadingHTTPServer — puerto 8090)    │
 │                                                      │
 │  GET  /api/state            → estado actual (polling)│
 │  POST /api/search           → busca en YouTube       │
@@ -55,7 +55,7 @@ Playme/
 │  GET  /api/download/mp3/{id}→ descarga mp3           │
 │  POST /api/conversions      → estado de descargas    │
 │  POST /api/clean/dl         → vaciar lista descargas │
-│  GET  /api/cookies|token    → configuración cookies  │
+│  GET  /api/ip              → IP pública (detección local)   │
 └────────────┬────────────────────────────────────────┘
              │
         ┌────┴────────────┬──────────────┐
@@ -160,7 +160,7 @@ Estado de cada conversión: {"status": queued|converting|ready|error,
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/` rep `/index.html` | Frontend web |
-| POST | `/api/state` | Estado actual (polling) |
+| GET | `/api/state` | Estado actual (polling) |
 | POST | `/api/search` | Buscar en YouTube |
 | POST | `/api/play` | Reproducir por video_id |
 | POST | `/api/pause` / `/api/resume` | Pausar / reanudar |
@@ -172,7 +172,6 @@ Estado de cada conversión: {"status": queued|converting|ready|error,
 | POST | `/api/conversions` | Listar conversiones (estado) |
 | POST | `/api/clean/dl` | Vaciar lista de descargas (solo UI) |
 | GET | `/api/ip` | IP pública del servidor |
-| GET | `/api/cookies` / `/api/token` | Páginas de configuración |
 
 ## Estrategias de Resolución de Stream
 

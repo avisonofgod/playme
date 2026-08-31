@@ -5,7 +5,7 @@ Servidor HTTP para buscar, reproducir en streaming y descargar en mp3 audio desd
 ## Arquitectura
 
 ```
-Browser ← HTTP → PlayMeHandler (ThreadedHTTPServer :8090)
+Browser ← HTTP → Handler (socketserver.ThreadingMixIn + HTTPServer :8090)
                     ├── Resolver (yt-dlp: búsqueda, stream URL, metadata)
                     ├── Player (cola, reproducción, next/prev)
                     ├── Transcoder (caché webm en /tmp/playme_cache)
@@ -38,7 +38,8 @@ Playme/
 └── .gitignore
 ```
 
-> Importante: el frontend vive en `frontend/index.html`. El servidor lo localiza en `backend/server.py` mediante `STATIC = dirname(dirname(dirname(__file__)))/frontend`. **No** existe una carpeta `static/`.
+> Importante: el frontend vive en `frontend/index.html`. El servidor lo localiza en `backend/server.py` mediante `STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")`
+    → resuelve a `/root/proyectos/Playme/frontend` (2 niveles desde `backend/server.py`). **No** existe una carpeta `static/`.
 
 ## Requisitos
 
@@ -82,7 +83,7 @@ mkdir -p logs
 
 # Configurar cookies (ver COOKIES_SETUP.md)
 # - Opcional: generar automáticamente desde Firefox vía backend/firefox_cookies.py
-# - Opcional: pegar manualmente en cookies.txt con /api/cookies
+# - Opcional: pegar manualmente en backend/cookies.txt
 ```
 
 ## Ejecución
