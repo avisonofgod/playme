@@ -10,14 +10,42 @@ Browser ← HTTP → PlayMeHandler (ThreadedHTTPServer :8090)
                     ├── Player (cola, reproducción, next/prev)
                     ├── Transcoder (caché webm en /tmp/playme_cache)
                     ├── TokenManager (SAPISID → cookies.txt)
+                    ├── FirefoxCookies (extracción cookies de Firefox)
                     └── Converter (yt-dlp + ffmpeg → mp3 en background)
 ```
+
+## Estructura del repositorio
+
+```
+Playme/
+├── backend/
+│   ├── server.py              # HTTP Server + API REST + Conversor mp3
+│   ├── player.py              # Lógica de negocio: cola, reproducción
+│   ├── resolver.py            # yt-dlp wrapper (búsqueda, stream, metadata)
+│   ├── transcoder.py          # Caché de audio webm (mpv)
+│   ├── token_manager.py       # Token SAPISID → cookies.txt
+│   ├── firefox_cookies.py     # Extracción de cookies de Firefox
+│   ├── cookie_parser.py       # Parser formato Netscape
+│   ├── normalize_cookies.py   # Normalización de cookies
+│   ├── runner.py              # Carga principal del servidor
+│   ├── verify_firefox_cookies.py  # Verificación de cookies
+│   └── test_*.py              # Suite (52 tests)
+├── frontend/
+│   └── index.html             # Frontend SPA (tabs: Reproducir/Cola/Descargas)
+├── README.md
+├── INSTALL.md                 # Este archivo
+├── COOKIES_SETUP.md           # Guía de configuración de cookies
+└── .gitignore
+```
+
+> Importante: el frontend vive en `frontend/index.html`. El servidor lo localiza en `backend/server.py` mediante `STATIC = dirname(dirname(dirname(__file__)))/frontend`. **No** existe una carpeta `static/`.
 
 ## Requisitos
 
 - **Python 3.12+**
-- **yt-dlp** (resolución YouTube)
+- **yt-dlp** (resolución YouTube y conversión)
 - **ffmpeg** (conversión a mp3)
+- **mpv** (caché de audio en background)
 - **Deno** (EJS challenge solver para yt-dlp 2026+)
 
 ### Instalación de dependencias
@@ -29,8 +57,8 @@ apt update && apt install -y python3 python3-pip
 # yt-dlp
 pip3 install yt-dlp
 
-# ffmpeg
-apt install -y ffmpeg
+# ffmpeg + mpv
+apt install -y ffmpeg mpv
 
 # Deno (para EJS challenge de yt-dlp)
 curl -fsSL https://deno.land/install.sh | sh
@@ -46,23 +74,15 @@ deno --version | head -1
 
 ```bash
 # Clonar repositorio
-git clone git@github.com:avisonofgod/playme.git /root/playme
-cd /root/playme
-
-# Archivos del proyecto:
-#   server.py          - HTTP Server + API + Conversor mp3
-#   player.py          - Cola y reproducción
-#   resolver.py        - Búsqueda y resolución YouTube
-#   transcoder.py      - Caché de audio webm
-#   token_manager.py   - Token SAPISID
-#   static/index.html  - Frontend web
+git clone git@github.com:avisonofgod/playme.git /root/proyectos/Playme
+cd /root/proyectos/Playme
 
 # Crear estructura de directorios
-mkdir -p logs static
+mkdir -p logs
 
-# Configurar token SAPISID (opcional, para videos bloqueados)
-echo "fH88mDHf_dXdqmGj/Avq22eV_AV3IREbDb" > token.txt
-# ^ Reemplazar con tu SAPISID real (de DevTools de Chrome en youtube.com)
+# Configurar cookies (ver COOKIES_SETUP.md)
+# - Opcional: generar automáticamente desde Firefox vía backend/firefox_cookies.py
+# - Opcional: pegar manualmente en cookies.txt con /api/cookies
 ```
 
 ## Ejecución
@@ -70,7 +90,7 @@ echo "fH88mDHf_dXdqmGj/Avq22eV_AV3IREbDb" > token.txt
 ### Producción (systemd)
 
 ```bash
-# Copiar servicio
+# Copiar servicio (ajustar WorkingDirectory/ExecStart a tu ruta real)
 cat > /etc/systemd/system/playme.service << 'EOF'
 [Unit]
 Description=PlayMe - YouTube Audio Streaming
@@ -80,9 +100,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/playme
+WorkingDirectory=/root/proyectos/Playme/backend
 Environment=PORT=8090
-ExecStart=/usr/bin/python3 /root/playme/server.py
+ExecStart=/usr/bin/python3 /root/proyectos/Playme/backend/server.py
 Restart=always
 RestartSec=5
 
@@ -103,7 +123,7 @@ curl http://localhost:8090/api/state
 ### Desarrollo (manual)
 
 ```bash
-cd /root/playme
+cd /root/proyectos/Playme/backend
 python3 server.py
 # Servidor en http://localhost:8090
 ```
@@ -112,57 +132,53 @@ python3 server.py
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/` | Frontend web |
-| GET | `/api/state` | Estado actual (cola, reproducción, conversiones) |
+| GET | `/` rep `/index.html` | Frontend web |
+| POST | `/api/state` | Estado actual (polling) |
 | POST | `/api/search` | Buscar en YouTube. Body: `{"query": "..."}` |
 | POST | `/api/play` | Reproducir. Body: `{"video_id": "..."}` |
-| POST | `/api/pause` | Pausar/reanudar |
-| POST | `/api/stop` | Detener y limpiar cola |
-| POST | `/api/next` | Siguiente en cola |
-| POST | `/api/prev` | Anterior en cola |
+| POST | `/api/pause` / `/api/resume` | Pausar / reanudar |
+| POST | `/api/next` / `/api/prev` / `/api/stop` | Navegación en cola |
 | POST | `/api/queue/add` | Agregar a cola. Body: `{"video_id":"...","title":"..."}` |
 | POST | `/api/queue/remove` | Quitar de cola. Body: `{"index":0}` |
 | GET | `/api/stream` | Streaming de audio (proxy o file) |
 | POST | `/api/convert` | Iniciar conversión a mp3. Body: `{"video_id":"...","title":"..."}` |
 | GET | `/api/download/mp3/{id}` | Descargar mp3 convertido |
-| POST | `/api/conversions` | Listar conversiones activas |
-| POST | `/api/clean/dl` | Limpiar todas las descargas |
+| POST | `/api/conversions` | Listar conversiones (estado) |
+| POST | `/api/clean/dl` | Vaciar lista descargas (solo UI, NO borra archivos) |
+| GET | `/api/ip` | IP pública del servidor |
 
 ## Flujo de reproducción
 
-1. Buscar: `POST /api/search` → lista de resultados (id, title, duration, uploader)
+1. Buscar: `POST /api/search` → 10 resultados (id, title, duration, uploader)
 2. Reproducir: `POST /api/play` → resuelve stream URL (yt-dlp --get-url)
    - Si existe en caché → modo file (instantáneo)
    - Si no → modo proxy (streaming) + descarga a caché en background
-3. Streaming: `GET /api/stream` → proxy de Google CDN con idle timeout 30s
+3. Streaming: `GET /api/stream` → proxy de Google CDN con timeout 5s/lectura
 4. Controles: pause, resume, next, prev, stop
 5. Polling: frontend consulta `/api/state` cada 2s para UI
 
-## Conversión a mp3
+## Conversión y descarga mp3
 
-1. Usuario hace clic en DW → `POST /api/convert` → thread en background
+1. DW (en fila o cola) → `POST /api/convert` → thread en background
 2. Fase 1: yt-dlp descarga bestaudio a webm (timeout 600s)
 3. Fase 2: ffmpeg convierte webm → mp3 320kbps con metadatos ID3
-4. Frontend monitorea con polling cada 1.5s
-5. Cuando status = "ready", muestra link de descarga
+4. Frontend monitorea con `POST /api/conversions` (polling 1.5s)
+5. Cuando status = "ready", muestra enlace de descarga (`/api/download/mp3/{id}`)
+6. `POST /api/clean/dl` vacía SOLO la lista de descargas (archivos mp3 intactos)
 
-## Calidad de audio
+## Directorios temporales
 
-| Modo | Formato | Bitrate |
-|------|---------|---------|
-| Streaming proxy | Opus (webm) | ~160kbps (bestaudio) |
-| Descarga mp3 | MP3 (libmp3lame) | 320kbps |
-| Caché | Opus (webm) | ~160kbps |
+| Directorio | Propósito |
+|------------|-----------|
+| `/tmp/playme_cache/` | Caché de audio webm (reproducción) |
+| `/tmp/playme_mp3/` | mp3 convertidos + titles.json |
 
-## Tokens y autenticación
+## Cookies y tokens
 
-Para videos bloqueados por región o CGNAT, se requiere token SAPISID:
-
-1. Abrir youtube.com en Chrome con sesión iniciada
-2. DevTools → Application → Cookies → youtube.com
-3. Copiar valor de SAPISID
-4. Pegar en `token.txt` (un token por línea)
-5. El servidor construye cookies.txt automáticamente y lo refresca cada 6h
+- Ver `COOKIES_SETUP.md` para la guía completa.
+- `backend/firefox_cookies.py` extrae cookies de Firefox y genera `cookies.txt`.
+- `backend/token_manager.py` gestiona el SAPISID token y refresca cookies cada 6h.
+- Los archivos `cookies.txt`, `token.txt`, `cookies_master.txt` están en `.gitignore` (no se versionan).
 
 ## Solución de problemas
 
@@ -174,7 +190,7 @@ systemctl status playme
 ss -tlnp | grep 8090
 
 # Logs
-tail -f /root/playme/logs/playme.log
+tail -f /root/proyectos/Playme/logs/playme.log
 
 # Probar API
 curl http://localhost:8090/api/state
@@ -193,27 +209,10 @@ fuser -k 8090/tcp
 systemctl start playme
 ```
 
-## Archivos importantes
+## Pruebas (backend)
 
+```bash
+cd /root/proyectos/Playme/backend
+python3 -m unittest discover -s . -p 'test_*.py'
+# Ran 52 tests ... OK
 ```
-/root/playme/
-├── server.py          # Servidor HTTP + API
-├── player.py          # Lógica de reproducción y cola
-├── resolver.py        # Integración con yt-dlp
-├── transcoder.py      # Caché de audio
-├── token_manager.py   # Gestión de tokens YouTube
-├── static/
-│   └── index.html     # Frontend (tabs: reproductor/descargas)
-├── logs/
-│   └── playme.log     # Log principal
-├── token.txt          # SAPISID (configuración única)
-├── cookies.txt        # Generado automáticamente desde token.txt
-└── README.md          # Este archivo
-```
-
-## Directorios temporales
-
-| Directorio | Propósito |
-|------------|-----------|
-| `/tmp/playme_cache/` | Caché de audio webm para reproducción |
-| `/tmp/playme_mp3/` | Archivos mp3 convertidos + titles.json |
