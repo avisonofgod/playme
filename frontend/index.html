@@ -46,6 +46,10 @@ button > *{pointer-events:none}
 .qi:hover{background:#1a1a2e}
 .qi .qt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .qi .qd{color:#e94560;cursor:pointer;font-size:0.85em}
+.qi .qp,.qi .qw{background:#2a2a3e;color:#889;padding:2px 8px;font-size:0.75em;border-radius:4px}
+.qi .qp:hover,.qi .qw:hover{color:#57e389}
+.qi.current{background:rgba(68,189,50,0.13);border-left:3px solid #44bd32}
+.qi.current .qt{color:#57e389}
 .dl-item{display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #1a1a2e;font-size:0.85em}
 .dl-item .dt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dl-ok{color:#44bd32;cursor:pointer;text-decoration:none;font-size:0.8em}
@@ -167,7 +171,7 @@ function updateUI() {
     qd.style.display="block"; var h=""
     for (var i=0;i<state.queue.length;i++) {
       var it=state.queue[i], cur=i===state.current_index?' current=""':""
-      h += '<div class="qi'+cur+'"><span class="qt">'+esc(it.title)+'</span><span class="qd" data-i="'+i+'">✕</span></div>'
+      h += '<div class="qi'+cur+'"><span class="qt">'+esc(it.title)+'</span><button class="qp" data-order="'+i+'" data-id="'+esc(it.video_id)+'">▶</button><button class="qw" data-id="'+esc(it.video_id)+'" data-tit="'+esc(it.title)+'">DW</button><span class="qd" data-i="'+i+'">✕</span></div>'
     }
     ql.innerHTML=h
   } else qd.style.display="none"
@@ -358,6 +362,8 @@ document.addEventListener("click", function(e) {
   if (t.classList.contains("rp")) { e.stopPropagation(); flash(t); playV(t.dataset.id); return }
   if (t.classList.contains("ra")) { e.stopPropagation(); flash(t); addQ(t.dataset.id,t.dataset.tit,parseInt(t.dataset.dur)||0,t.dataset.up); return }
   if (t.classList.contains("rd")) { e.stopPropagation(); flash(t); dwVideo(t.dataset.id,t.dataset.tit); return }
+  if (t.classList.contains("qp")) { e.stopPropagation(); flash(t); playV(t.dataset.id); return }
+  if (t.classList.contains("qw")) { e.stopPropagation(); flash(t); dwVideo(t.dataset.id,t.dataset.tit); return }
   if (t.classList.contains("qd")) { e.stopPropagation(); remQ(parseInt(t.dataset.i)); return }
   var id=t.id||(t.parentElement&&t.parentElement.id)
   if (id==="playBtn"){toggleP();return}
