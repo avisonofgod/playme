@@ -69,6 +69,7 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 <h1>♫ PlayMe</h1>
 <div id="tabs">
 <button id="tabPlay" class="active">🎵 Reproducir</button>
+<button id="tabQueue">🗂 Cola</button>
 <button id="tabDl">⬇ Descargas</button>
 </div>
 
@@ -89,7 +90,12 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 <button id="stopBtn" disabled>⏹</button>
 </div>
 <div id="status">Listo</div>
-<div id="qdiv"><h3>Cola</h3><div id="ql"></div></div>
+</div>
+
+<!-- TAB QUEUE -->
+<div id="panelQueue" class="tab">
+<h3 style="color:#e9a820;margin-bottom:8px">🗂 Cola</h3>
+<div id="qdiv"><div id="ql"></div></div>
 </div>
 
 <!-- TAB DOWNLOADS -->
@@ -118,8 +124,10 @@ function st(msg, type) { var e = $("status"); e.textContent = msg; e.className =
 
 function switchTab(name) {
   $("tabPlay").className = name === "play" ? "active" : ""
+  $("tabQueue").className = name === "queue" ? "active" : ""
   $("tabDl").className = name === "dl" ? "active" : ""
   $("panelPlay").className = "tab" + (name === "play" ? " active" : "")
+  $("panelQueue").className = "tab" + (name === "queue" ? " active" : "")
   $("panelDl").className = "tab" + (name === "dl" ? " active" : "")
   if (name === "dl") { pollDl(); if (!dlTimer) dlTimer = setInterval(pollDl, 1500) }
   else { if (dlTimer) { clearInterval(dlTimer); dlTimer = null } }
@@ -358,6 +366,7 @@ document.addEventListener("click", function(e) {
   if (id==="stopBtn"){stopP();return}
   if (id==="searchBtn"){doSearch();return}
   if (id==="tabPlay"){switchTab("play");return}
+  if (id==="tabQueue"){switchTab("queue");return}
   if (id==="tabDl"){switchTab("dl");return}
   if (id==="cleanDlBtn"){cleanDl();return}
 })
