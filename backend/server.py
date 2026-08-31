@@ -564,19 +564,11 @@ class Handler(BaseHTTPRequestHandler):
                     c = dict(_conversions)
                 self._send(*json_res({"ok": True, "conversions": c}))
             elif path == "/api/clean/dl":
-                import shutil
+                # SOLO limpia la lista de descargas (UI). NO borra archivos mp3 en disco.
                 try:
-                    # Matar procesos yt-dlp y ffmpeg activos
-                    for f in os.listdir(MP3_DIR):
-                        if f.endswith(".webm"):
-                            vid = f[:-5]
-                            subprocess.run(["pkill", "-9", "-f", vid], capture_output=True, timeout=5)
-                    if os.path.isdir(MP3_DIR):
-                        shutil.rmtree(MP3_DIR)
-                        os.makedirs(MP3_DIR, exist_ok=True)
                     with _conv_lock:
                         _conversions.clear()
-                    logger.info("Downloads cleaned")
+                    logger.info("Downloads list cleared (files kept on disk)")
                     self._send(*json_res({"ok": True}))
                 except Exception as e:
                     logger.error(f"Clean error: {e}")

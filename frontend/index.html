@@ -104,7 +104,10 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 
 <!-- TAB DOWNLOADS -->
 <div id="panelDl" class="tab">
-<h3 style="color:#e9a820;margin-bottom:8px">⬇ Descargas</h3>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<h3 style="color:#e9a820;margin:0">⬇ Descargas</h3>
+<button id="clearDlBtn" style="background:#e94560;color:#fff;padding:4px 10px;font-size:0.75em;border:none;border-radius:4px;cursor:pointer">🗑 Vaciar descargas</button>
+</div>
 <div id="dlList" class="ruleta"><div class="rm" style="padding:8px">Sin descargas</div></div>
 </div>
 
@@ -315,8 +318,7 @@ function renderDl(convs) {
   var el=$("dlList")
   var keys=Object.keys(convs)
   if (!keys.length) { el.innerHTML='<div class="rm" style="padding:8px">Sin descargas</div>'; return }
-  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span></span><button id="cleanDlBtn" style="background:#e94560;color:#fff;padding:4px 10px;font-size:0.75em;border:none;border-radius:4px;cursor:pointer">🗑 Limpiar todo</button></div>'
-  h += '<div style="display:flex;padding:4px 8px;font-size:0.75em;color:#889;border-bottom:1px solid #333">'
+  var h='<div style="display:flex;padding:4px 8px;font-size:0.75em;color:#889;border-bottom:1px solid #333">'
     + '<span style="flex:2">TITULO</span><span style="flex:1">ID</span><span style="flex:0 0 60px;text-align:center">ACCION</span></div>'
   for (var i=0;i<keys.length;i++) {
     var id=keys[i], c=convs[id], tit=esc(c.title||id)
@@ -375,6 +377,7 @@ document.addEventListener("click", function(e) {
   if (id==="tabQueue"){switchTab("queue");return}
   if (id==="tabDl"){switchTab("dl");return}
   if (id==="cleanDlBtn"){cleanDl();return}
+  if (id==="clearDlBtn"){cleanDl();return}
 })
 
 document.addEventListener("keydown",function(e) {
