@@ -171,7 +171,7 @@ function updateUI() {
     qd.style.display="block"; var h=""
     for (var i=0;i<state.queue.length;i++) {
       var it=state.queue[i], cur=i===state.current_index?' current':""
-      h += '<div class="qi'+cur+'"><span class="qt">'+esc(it.title)+'</span><button class="qp" data-order="'+i+'" data-id="'+esc(it.video_id)+'">▶</button><button class="qw" data-id="'+esc(it.video_id)+'" data-tit="'+esc(it.title)+'">DW</button><span class="qd" data-i="'+i+'">✕</span></div>'
+      h += '<div class="qi'+cur+'"><span class="qt">'+esc(it.title)+'</span><button class="qp" data-order="'+i+'" data-id="'+esc(it.id)+'">▶</button><button class="qw" data-id="'+esc(it.id)+'" data-tit="'+esc(it.title)+'">DW</button><span class="qd" data-i="'+i+'">✕</span></div>'
     }
     ql.innerHTML=h
   } else qd.style.display="none"
