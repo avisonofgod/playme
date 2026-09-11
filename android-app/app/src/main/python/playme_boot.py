@@ -36,6 +36,8 @@ def start(data_dir):
         os.environ["PLAYME_HOST"] = "127.0.0.1"
         os.environ["PLAYME_COOKIES_FILE"] = os.path.join(data_dir, "cookies.txt")
         os.environ["PLAYME_COOKIES_BACKUP"] = os.path.join(data_dir, "cookies_master.txt")
+        # Android no tiene /tmp escribible: ruta temp explicita para la copia que usa yt-dlp
+        os.environ["PLAYME_COOKIES_TEMP"] = os.path.join(cache, "playme_cookies.txt")
         os.environ["PLAYME_MP3_DIR"] = mp3
         os.environ["PLAYME_CACHE_DIR"] = cache
         os.environ["PLAYME_LOG_DIR"] = logs
@@ -55,6 +57,27 @@ def start(data_dir):
             print("boot: dns_java no aplicado: %s" % e)
 
         import server  # importa el backend (resolver/player/transcoder/token_manager)
+
+        # Diagnostico de rutas (visible en logcat con tag PlayMeBoot)
+        try:
+            try:
+                from java import jclass
+                _Log = jclass("android.util.Log")
+
+                def logi(m):
+                    _Log.i("PlayMeBoot", str(m))
+            except Exception:
+                def logi(m):
+                    print("PlayMeBoot:", m)
+
+            import tempfile as _tf
+            import resolver as _res
+            logi("TMPDIR=%s tempdir=%s" % (os.environ.get("TMPDIR"), _tf.gettempdir()))
+            logi("LIVE=%s exists=%s" % (_res.COOKIES_LIVE, os.path.isfile(_res.COOKIES_LIVE)))
+            logi("TEMP=%s exists=%s" % (_res.COOKIES_TEMP, os.path.isfile(_res.COOKIES_TEMP)))
+            logi("BACKUP=%s" % _res.COOKIES_BACKUP)
+        except Exception as e:
+            print("PlayMeBoot: diag error %s" % e)
         threading.Thread(target=server.main, daemon=True, name="playme-server").start()
 
         port = int(os.environ.get("PORT", "8191"))

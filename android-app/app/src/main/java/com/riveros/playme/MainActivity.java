@@ -155,15 +155,18 @@ public class MainActivity extends Activity {
     }
 
     void guardarCookie() {
+        Log.i(TAG, "guardarCookie: leyendo cookies del WebView...");
         String ck = CookieManager.getInstance().getCookie("https://www.youtube.com");
         if (ck == null || !ck.contains("SID=")) {
             ck = CookieManager.getInstance().getCookie("https://m.youtube.com");
         }
         if (ck == null || !ck.contains("SID=")) {
+            Log.w(TAG, "guardarCookie: SIN SID todavia (len=" + (ck==null?0:ck.length()) + ")");
             Toast.makeText(this, "Sin sesion en YouTube: inicia sesion primero", Toast.LENGTH_LONG).show();
             return;
         }
         int n = escribirNetscape(ck);
+        Log.i(TAG, "guardarCookie: " + n + " cookies -> " + cookieFile + " SID=" + ck.contains("SID=") + " HSID=" + ck.contains("HSID="));
         Toast.makeText(this, "Cookie guardada (" + n + " cookies)", Toast.LENGTH_LONG).show();
         loginMode = false;
         btnLogin.setText("INICIAR SESION YOUTUBE");

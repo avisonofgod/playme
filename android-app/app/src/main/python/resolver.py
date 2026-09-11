@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # PLAYME_COOKIES_FILE permita reubicarlos en Android (filesDir).
 COOKIES_LIVE = os.environ.get("PLAYME_COOKIES_FILE") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies.txt")
 COOKIES_BACKUP = os.environ.get("PLAYME_COOKIES_BACKUP") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "cookies_master.txt")
-COOKIES_TEMP = os.path.join(tempfile.gettempdir(), "playme_cookies.txt")
+COOKIES_TEMP = os.environ.get("PLAYME_COOKIES_TEMP") or os.path.join(tempfile.gettempdir(), "playme_cookies.txt")
 
 
 class Resolver:
