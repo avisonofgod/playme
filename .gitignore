@@ -6,3 +6,6 @@ cookies.txt
 token.txt
 cookies_master.txt
 *.rsc
+*.keystore
+keystore.properties
+dist/

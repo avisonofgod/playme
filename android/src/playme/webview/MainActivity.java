@@ -23,15 +23,19 @@ import java.util.List;
  * PlayMe WebView: URL del servidor configurable.
  *
  * Orden de resolución de la URL:
- *   a) SharedPreferences "server_url" (guardada en uso anterior)
- *   b) 127.0.0.1:8090 (servidor local) -> si responde HTTP 200
- *   c) IP pública del servidor detectada vía api.ipify.org + :8090 -> si responde
+ *   a) SharedPreferences "server_url" (guardada en uso anterior)  [admite ip:puerto]
+ *   b) 127.0.0.1:8191 (servidor local en el mismo dispositivo) -> si responde HTTP 200
+ *   c) IP pública del dispositivo vía api.ipify.org + :8191 -> si responde
  *   d) Diálogo manual pidiendo IP/host (guardado para el siguiente arranque)
+ *
+ * Puerto del servidor PlayMe: 8191 (systemd playme.service, PORT=8191).
+ * El servidor resuelve YouTube con la cookie del propio servidor; el móvil
+ * solo consume la web/API (no necesita cookies de YouTube).
  */
 public class MainActivity extends Activity {
     private static final String PREFS = "playme_prefs";
     private static final String KEY_URL = "server_url";
-    private static final int PORT = 8090;
+    private static final int PORT = 8191;
     private static final int TIMEOUT_MS = 2000;
 
     private WebView webView;
