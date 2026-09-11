@@ -5,7 +5,7 @@ Servidor HTTP para buscar, reproducir en streaming y descargar en mp3 audio desd
 ## Arquitectura
 
 ```
-Browser ← HTTP → Handler (socketserver.ThreadingMixIn + HTTPServer :8090)
+Browser ← HTTP → Handler (socketserver.ThreadingMixIn + HTTPServer :8191)
                     ├── Resolver (yt-dlp: búsqueda, stream URL, metadata)
                     ├── Player (cola, reproducción, next/prev)
                     ├── Transcoder (caché webm en /tmp/playme_cache)
@@ -102,7 +102,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/root/proyectos/Playme/backend
-Environment=PORT=8090
+Environment=PORT=8191
 ExecStart=/usr/bin/python3 /root/proyectos/Playme/backend/server.py
 Restart=always
 RestartSec=5
@@ -118,7 +118,7 @@ systemctl start playme
 
 # Verificar
 systemctl status playme
-curl http://localhost:8090/api/state
+curl http://localhost:8191/api/state
 ```
 
 ### Desarrollo (manual)
@@ -126,7 +126,7 @@ curl http://localhost:8090/api/state
 ```bash
 cd /root/proyectos/Playme/backend
 python3 server.py
-# Servidor en http://localhost:8090
+# Servidor en http://localhost:8191
 ```
 
 ## API Endpoints
@@ -188,13 +188,13 @@ python3 server.py
 systemctl status playme
 
 # Verificar puerto
-ss -tlnp | grep 8090
+ss -tlnp | grep 8191
 
 # Logs
 tail -f /root/proyectos/Playme/logs/playme.log
 
 # Probar API
-curl http://localhost:8090/api/state
+curl http://localhost:8191/api/state
 
 # Cache de audio
 ls /tmp/playme_cache/
@@ -206,7 +206,7 @@ ls /tmp/playme_mp3/
 systemctl restart playme
 
 # Si el puerto está ocupado
-fuser -k 8090/tcp
+fuser -k 8191/tcp
 systemctl start playme
 ```
 

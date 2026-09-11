@@ -13,7 +13,7 @@ from player import Player
 from cookie_parser import build_cookie_header
 from runner import run_command, _kill_group as _kill_group_runner
 
-PORT = int(os.environ.get("PORT", "8090"))
+PORT = int(os.environ.get("PORT", "8191"))
 STATIC = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))

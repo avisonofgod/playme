@@ -41,7 +41,7 @@ Playme/
              │ HTTP (GET/POST)
              ▼
 ┌─────────────────────────────────────────────────────┐
-│  Handler (ThreadingHTTPServer — puerto 8090)    │
+│  Handler (ThreadingHTTPServer — puerto 8191)    │
 │                                                      │
 │  GET  /api/state            → estado actual (polling)│
 │  POST /api/search           → busca en YouTube       │
