@@ -203,11 +203,32 @@ El SAPISID token permite que yt-dlp evite bloqueos CGNAT. El TokenManager refres
 
 ```bash
 # Manual (desarrollo)
-cd /root/proyectos/Playme/backend && PORT=8090 python3 server.py
+cd /root/proyectos/Playme/backend && PORT=8191 python3 server.py
 
 # Producción (systemd) → ver INSTALL.md
 systemctl start playme.service
-# Puerto: 8090 (configurable via PORT env)
+# Puerto: 8191 (configurable via PORT env)
+```
+
+## Android (APK WebView)
+
+APK precompilado: **GitHub Releases** → `PlayMe-1.0.apk` (appId `playme.webview`, minSdk 24).
+Firma: `CN=Riveros` (keystore `android/playme-release.keystore`, NO versionado).
+
+Instalación:
+1. Instala el APK en el móvil (adb install -r o abrir el archivo).
+2. Al abrir por primera vez, escribe la dirección del servidor (`IP_DEL_SERVER:8191`).
+   Orden de autodetección: última URL guardada → `127.0.0.1:8191` → IP pública:8191 → diálogo manual.
+3. El servidor debe estar arriba (`systemctl status playme`) y el móvil alcanzarlo
+   (misma red WiFi/LAN o IP pública con el puerto 8191 accesible; se permite HTTP en claro).
+
+**El móvil NO necesita cookies.** Quien resuelve YouTube es el servidor, con la cookie de
+`/root/proyectos/Playme/cookies.txt` (extraída del Firefox del servidor). La sesión de la
+app YouTube de Android no se usa (no es posible extraer cookies de una app Android sin root).
+
+Recompilar:
+```bash
+bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SDK en /opt/android-sdk)
 ```
 
 ## Archivos Clave
@@ -223,6 +244,7 @@ backend/
 └── runner.py         # Carga principal
 frontend/
 └── index.html        # Frontend SPA (vanilla JS, polling, 3 tabs)
+android/              # APK WebView: MainActivity.java (puerto 8191), build-apk.sh, dist/
 logs/                 # playme.log + errors.log
 ```
 
