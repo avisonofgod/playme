@@ -231,6 +231,20 @@ Recompilar:
 bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SDK en /opt/android-sdk)
 ```
 
+## App Android autónoma (`android-app/`)
+
+APK **independiente**: PlayMe corre DENTRO del móvil (Python 3.11 + yt-dlp embebidos con
+Chaquopy), escucha en `127.0.0.1:8191` y se muestra en un WebView. No necesita PC ni servidor.
+- `android-app/app/src/main/python/` → backend portado (mismas clases, rutas por variables de entorno).
+- `playme_boot.py` → arranca el backend en el dispositivo; `ytdlp_inproc.py` → ejecuta yt-dlp en proceso
+  (en Android no hay binario ni subprocess util).
+- Cookie de YouTube: la app abre el login de YouTube en su WebView y captura SID/HSID
+  (`CookieManager`) escribiendo `cookies.txt` en `filesDir`; botón "Guardar cookie de YouTube".
+  Si ya existe cookie válida, arranca directo.
+- Compilar: `cd android-app && ./gradlew assembleRelease` (JDK 17+, Android SDK, Chaquopy descarga Python).
+- Firmado con el keystore de Riveros (`android/playme-release.keystore`, no versionado).
+- Requisitos: `minSdk 24`, ABIs `arm64-v8a` + `x86_64`.
+
 ## Archivos Clave
 
 ```

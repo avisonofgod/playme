@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlayMe</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:sans-serif;background:#0d0d0d;color:#e0e0e0;padding:20px;max-width:600px;margin:auto}
+h1{text-align:center;color:#e94560;margin:0 0 16px 0}
+#tabs{display:flex;gap:4px;margin-bottom:12px}
+#tabs button{flex:1;padding:8px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#888;cursor:pointer;font-size:0.85em}
+#tabs button.active{background:#e94560;color:#fff;border-color:#e94560}
+.tab{display:none}
+.tab.active{display:block}
+input{width:100%;padding:10px;border:1px solid #333;border-radius:6px;background:#1a1a2e;color:#e0e0e0;font-size:1em;margin-bottom:8px}
+input:focus{border-color:#e94560;outline:none}
+button, #tabs button, .r button, .controls button, .pb, #searchBtn, .dl-ok, .qd{cursor:pointer;padding:8px 14px;border:none;border-radius:6px;font-size:0.9em}
+button > *{pointer-events:none}
+#searchBtn{background:#e94560;color:#fff;width:100%;margin-bottom:12px}
+#searchBtn:disabled{opacity:0.4}
+.r{display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #1a1a2e}
+.r:hover{background:#1a1a2e}
+.ri{flex:1;min-width:0}
+.rt{font-size:0.9em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rm{font-size:0.75em;color:#889}
+.r button{padding:4px 10px;border-radius:4px;font-size:0.8em}
+.rp{background:transparent;border:1px solid #e94560;color:#e94560}
+.ra{background:transparent;border:1px solid #555;color:#888}
+.rd{background:transparent;border:1px solid #e9a820;color:#e9a820;font-size:0.7em;padding:4px 6px}
+#np{display:none;background:#1a1a2e;border-radius:8px;padding:12px;text-align:center;margin-bottom:12px}
+#np.active{display:block}
+#np .t{font-size:1em;font-weight:600}
+#np .m{font-size:0.8em;color:#889;margin:4px 0}
+#np .b{display:inline-block;padding:2px 8px;border-radius:4px;font-size:0.7em;text-transform:uppercase}
+.bproxy{background:#1a6b3c;color:#8f8}
+.bfile{background:#1a3a6b;color:#8bf}
+#ctrl{display:flex;justify-content:center;gap:8px;margin:12px 0}
+#ctrl button{width:46px;height:46px;border-radius:50%;border:1px solid #333;background:#1a1a2e;color:#e0e0e0;font-size:1.2em}
+#ctrl button:disabled{opacity:0.3}
+#ctrl .pb{background:#e94560;border-color:#e94560;font-size:1.4em;width:56px;height:56px}
+#status{text-align:center;font-size:0.8em;color:#889;margin:8px 0}
+#qdiv{display:none;margin-top:8px}
+#qdiv h3{font-size:0.85em;color:#889;margin-bottom:4px}
+.qi{display:flex;align-items:center;gap:6px;padding:4px 6px;font-size:0.85em}
+.qi:hover{background:#1a1a2e}
+.qi .qt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qi .qd{color:#e94560;cursor:pointer;font-size:0.85em}
+.qi .qp,.qi .qw{background:#2a2a3e;color:#889;padding:2px 8px;font-size:0.75em;border-radius:4px}
+.qi .qp:hover,.qi .qw:hover{color:#57e389}
+.qi.current{background:rgba(68,189,50,0.13);border-left:3px solid #44bd32}
+.qi.current .qt{color:#57e389}
+.dl-item{display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #1a1a2e;font-size:0.85em}
+.dl-item .dt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl-ok{color:#44bd32;cursor:pointer;text-decoration:none;font-size:0.8em}
+.dl-err{color:#e94560;font-size:0.75em}
+/* ── Ruleta: listado con scroll enmascarado (8 filas visibles) ── */
+.ruleta{position:relative;max-height:calc(8 * 34px);overflow-y:auto;scroll-behavior:smooth;scrollbar-width:none;-ms-overflow-style:none}
+.ruleta::-webkit-scrollbar{display:none}
+.ruleta::before,.ruleta::after{content:"";position:sticky;display:block;height:12px;z-index:1;pointer-events:none}
+.ruleta::before{top:0;background:linear-gradient(to bottom,rgba(13,13,13,1),rgba(13,13,13,0))}
+.ruleta::after{bottom:0;background:linear-gradient(to top,rgba(13,13,13,1),rgba(13,13,13,0));margin-top:-12px}
+/* ── Feedback verde: fila activa y flash de boton ── */
+#results .r.active{background:rgba(68,189,50,0.13);border-left:3px solid #44bd32}
+#results .r.active .rt{color:#57e389}
+#dlList .dl-item.active{background:rgba(68,189,50,0.13)}
+#dlList .dl-item.active .dt{color:#57e389}
+button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-color:#44bd32!important;background:#44bd32!important}
+
+</style>
+</head>
+<body>
+<h1>♫ PlayMe</h1>
+<div id="tabs">
+<button id="tabPlay" class="active">🎵 Reproducir</button>
+<button id="tabQueue">🗂 Cola</button>
+<button id="tabDl">⬇ Descargas</button>
+</div>
+
+<!-- TAB PLAYER -->
+<div id="panelPlay" class="tab active">
+<input id="q" placeholder="Buscar..." autofocus>
+<button id="searchBtn">🔍 Buscar</button>
+<div id="results" class="ruleta"></div>
+<div id="np">
+<div class="t" id="npTitle">—</div>
+<div class="m" id="npMeta">—</div>
+<div id="npBadge"></div>
+</div>
+<div id="ctrl">
+<button id="prevBtn" disabled>⏮</button>
+<button class="pb" id="playBtn" disabled>▶</button>
+<button id="nextBtn" disabled>⏭</button>
+<button id="stopBtn" disabled>⏹</button>
+</div>
+<div id="status">Listo</div>
+</div>
+
+<!-- TAB QUEUE -->
+<div id="panelQueue" class="tab">
+<h3 style="color:#e9a820;margin-bottom:8px">🗂 Cola</h3>
+<div id="qdiv"><div id="ql"></div></div>
+</div>
+
+<!-- TAB DOWNLOADS -->
+<div id="panelDl" class="tab">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<h3 style="color:#e9a820;margin:0">⬇ Descargas</h3>
+<button id="clearDlBtn" style="background:#e94560;color:#fff;padding:4px 10px;font-size:0.75em;border:none;border-radius:4px;cursor:pointer">🗑 Vaciar descargas</button>
+</div>
+<div id="dlList" class="ruleta"><div class="rm" style="padding:8px">Sin descargas</div></div>
+</div>
+
+<script>
+var state = {}
+var audio = null
+var pt = null
+var dlTimer = null
+var offline = false
+
+function $(id) { return document.getElementById(id) }
+function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML }
+function dur(sec) { if (!sec || sec <= 0) return "?:??"; var m = Math.floor(sec/60), n = Math.floor(sec%60); return m + ":" + (n<10?"0":"") + n }
+function flash(btn) { if (!btn || !btn.classList) return; btn.classList.add("g"); setTimeout(function(){ btn.classList.remove("g") }, 600) }
+function syncActiveRows() {
+  var rows = document.querySelectorAll("#results .r"), cid = state.current ? state.current.id : null
+  for (var i=0;i<rows.length;i++) { if (rows[i].dataset.id === cid) rows[i].classList.add("active"); else rows[i].classList.remove("active") }
+}
+
+function st(msg, type) { var e = $("status"); e.textContent = msg; e.className = "status" + (type ? " " + type : "") }
+
+function switchTab(name) {
+  $("tabPlay").className = name === "play" ? "active" : ""
+  $("tabQueue").className = name === "queue" ? "active" : ""
+  $("tabDl").className = name === "dl" ? "active" : ""
+  $("panelPlay").className = "tab" + (name === "play" ? " active" : "")
+  $("panelQueue").className = "tab" + (name === "queue" ? " active" : "")
+  $("panelDl").className = "tab" + (name === "dl" ? " active" : "")
+  if (name === "dl") { pollDl(); if (!dlTimer) dlTimer = setInterval(pollDl, 1500) }
+  else { if (dlTimer) { clearInterval(dlTimer); dlTimer = null } }
+}
+
+function api(method, path, body) {
+  var opts = {method: method}
+  if (body) { opts.headers = {"Content-Type": "application/json"}; opts.body = JSON.stringify(body) }
+  return fetch(path, opts).then(function(r) { return r.json() })["catch"](function() { return null })
+}
+
+// ── Player ──
+function playAudio() {
+  if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load() }
+  if (state.mode === "proxy" || state.mode === "file") {
+    audio = new Audio(); audio.volume = 0.8
+    audio.src = "/api/stream?_=" + Date.now(); audio.load()
+    audio.play()["catch"](function(e) { if (e.name !== "AbortError") st("Error: "+e.message, "error") })
+  }
+}
+
+function updateUI() {
+  var np=$("np"),pb=$("playBtn"),pr=$("prevBtn"),nx=$("nextBtn"),stb=$("stopBtn")
+  if (state.playing && state.current) {
+    np.classList.add("active")
+    $("npTitle").textContent = state.current.title
+    $("npMeta").textContent = (state.current.uploader||"")+" • "+dur(state.current.duration)
+    $("npBadge").innerHTML = '<span class="b '+(state.mode==="proxy"?"bproxy":"bfile")+'">'+state.mode+"</span>"
+    pb.disabled=false; stb.disabled=false; pb.textContent=state.paused?"▶":"⏸"
+    pr.disabled=state.current_index<=0; nx.disabled=false
+  } else {
+    np.classList.remove("active"); pb.disabled=true; stb.disabled=true; pr.disabled=true; nx.disabled=true
+    pb.textContent="▶"
+  }
+  var qd=$("qdiv"), ql=$("ql")
+  if (state.queue && state.queue.length > 1) {
+    qd.style.display="block"; var h=""
+    for (var i=0;i<state.queue.length;i++) {
+      var it=state.queue[i], cur=i===state.current_index?' current':""
+      h += '<div class="qi'+cur+'"><span class="qt">'+esc(it.title)+'</span><button class="qp" data-order="'+i+'" data-id="'+esc(it.id)+'">▶</button><button class="qw" data-id="'+esc(it.id)+'" data-tit="'+esc(it.title)+'">DW</button><span class="qd" data-i="'+i+'">✕</span></div>'
+    }
+    ql.innerHTML=h
+  } else qd.style.display="none"
+}
+
+var searchTimer = null
+function doSearch() {
+  var q = $("q").value.trim(); if (!q) return
+  $("searchBtn").disabled=true; st("Buscando...","loading")
+  api("POST","/api/search",{query:q}).then(function(data) {
+    $("searchBtn").disabled=false
+    if (data && data.ok) {
+      var el=$("results")
+      if (!data.results||!data.results.length) { el.innerHTML='<div class="rm">Sin resultados</div>'; return }
+      var html=""
+      for (var i=0;i<data.results.length;i++) {
+        var v=data.results[i], tit=esc(v.title)
+        if (tit.length>50) tit=tit.substring(0,47)+"..."
+        html += '<div class="r" data-id="'+esc(v.id)+'"><div class="ri"><div class="rt" title="'+esc(v.title)+'">'+tit+'</div><div class="rm">'+esc(v.id)+" · "+esc(v.uploader)+" · "+dur(v.duration)+'</div></div>'
+         +'<button class="rp" data-id="'+esc(v.id)+'">▶</button>'
+         +'<button class="ra" data-id="'+esc(v.id)+'" data-tit="'+esc(v.title)+'" data-dur="'+(v.duration||0)+'" data-up="'+esc(v.uploader||"")+'">+</button>'
+         +'<button class="rd" data-id="'+esc(v.id)+'" data-tit="'+esc(v.title)+'">DW</button></div>'
+      }
+      el.innerHTML=html; st("")
+    } else st("Error","error")
+  })
+}
+// Debounce de búsqueda (250ms): evita disparos duplicados al pulsar Enter repetido
+function debouncedSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(doSearch, 250)
+}
+
+function playV(id) {
+  st("Cargando...", "loading")
+  api("POST", "/api/play", {video_id: id}).then(function(data) {
+    if (!data || !data.ok) { st(data && data.error ? data.error : "Error", "error"); return }
+    if (data.resolving) { waitResolved(); return }
+    state = data; updateUI(); playAudio(); st("Reproduciendo", "success")
+  })
+}
+
+// El play es asincrono (resolucion de stream en background): poll hasta que
+// resolving=false y el modo este listo, luego conecta el audio.
+function waitResolved() {
+  var tries = 0
+  var t = setInterval(function() {
+    api("GET", "/api/state").then(function(data) {
+      if (!data || !data.ok) { clearInterval(t); st("Error de conexión", "error"); return }
+      if (data.resolving) {
+        if (++tries > 60) { clearInterval(t); st("Timeout al resolver", "error") }
+        return
+      }
+      clearInterval(t)
+      if (data.playing && data.mode) { state = data; updateUI(); playAudio(); st("Reproduciendo", "success") }
+      else st("No se pudo reproducir", "error")
+    })
+  }, 1000)
+}
+
+function addQ(id,title,duration,uploader) {
+  api("POST","/api/queue/add",{video_id:id,title:title,duration:duration,uploader:uploader}).then(function() {
+    api("GET","/api/state").then(function(data) { if (data&&data.ok) { state=data; updateUI(); st("Añadido","success") } })
+  })
+}
+
+function remQ(i) {
+  api("POST","/api/queue/remove",{index:i}).then(function() {
+    api("GET","/api/state").then(function(data) { if (data&&data.ok) { state=data; updateUI() } })
+  })
+}
+
+function toggleP() {
+  if (!state.playing) return
+  if (state.paused) api("POST","/api/resume",null).then(function(){poll()})
+  else api("POST","/api/pause",null).then(function(){poll()})
+}
+
+function nextT() {
+  api("POST","/api/next",null).then(function(){
+    api("GET","/api/state").then(function(data) {
+      if (data&&data.ok) {
+        var oid=state.current?state.current.id:null; state=data; updateUI()
+        if (data.playing&&data.current&&data.current.id!==oid) playAudio()
+        else if (!data.playing&&audio) { audio.pause(); audio.src=""; audio.load() }
+      }
+    })
+  })
+}
+
+function prevT() {
+  api("POST","/api/prev",null).then(function(){
+    api("GET","/api/state").then(function(data) {
+      if (data&&data.ok) {
+        var oid=state.current?state.current.id:null; state=data; updateUI()
+        if (data.playing&&data.current&&data.current.id!==oid) playAudio()
+        else if (!data.playing&&audio) { audio.pause(); audio.src=""; audio.load() }
+      }
+    })
+  })
+}
+
+function stopP() {
+  if (audio) { audio.pause(); audio.src=""; audio.load() }
+  api("POST","/api/stop",null).then(function(){poll()})
+}
+
+// ── Downloads ──
+function dwVideo(id, title) {
+  st("Agregando a descargas...","loading")
+  api("POST","/api/convert",{video_id:id,title:title}).then(function(data) {
+    if (data && data.ok) {
+      st("En cola de descarga","success")
+      pollDl()
+      switchTab("dl")
+    } else {
+      st("Error: "+(data&&data.error?data.error:"falló"),"error")
+    }
+  })
+}
+
+function pollDl() {
+  api("POST","/api/conversions",{}).then(function(data) {
+    if (data && data.ok) renderDl(data.conversions || {})
+  })
+}
+
+function cleanDl() {
+  if (!confirm("Eliminar todas las descargas?")) return
+  api("POST","/api/clean/dl",{}).then(function(data) {
+    if (data && data.ok) {
+      pollDl()
+      st("Descargas eliminadas","success")
+    } else {
+      st("Error al limpiar","error")
+    }
+  })
+}
+
+function renderDl(convs) {
+  var el=$("dlList")
+  var keys=Object.keys(convs)
+  if (!keys.length) { el.innerHTML='<div class="rm" style="padding:8px">Sin descargas</div>'; return }
+  var h='<div style="display:flex;padding:4px 8px;font-size:0.75em;color:#889;border-bottom:1px solid #333">'
+    + '<span style="flex:2">TITULO</span><span style="flex:1">ID</span><span style="flex:0 0 60px;text-align:center">ACCION</span></div>'
+  for (var i=0;i<keys.length;i++) {
+    var id=keys[i], c=convs[id], tit=esc(c.title||id)
+    var idShort = id.length > 14 ? id.substring(0, 11) + "..." : id
+    h += '<div class="dl-item">'
+      + '<span class="dt" style="flex:2">'+tit+'</span>'
+      + '<span style="flex:1;font-size:0.75em;color:#889">'+idShort+'</span>'
+      + '<span style="flex:0 0 60px;text-align:center">'
+    if (c.status==="ready") {
+      // Sin ?title= ni download=: el backend define el nombre via Content-Disposition
+      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'">⬇</a>'
+    } else if (c.status==="error") {
+      h += '<span class="dl-err">Error</span>'
+    } else {
+      h += '<span style="color:#e9a820;font-size:1.1em">⏳</span>'
+    }
+    h += '</span></div>'
+  }
+  el.innerHTML=h
+}
+
+
+function poll() {
+  api("GET","/api/state").then(function(data) {
+    if (data && data.ok) {
+      if (offline) { offline = false; st("Listo","success") } // recuperado
+      var oid=state.current?state.current.id:null, wp=state.playing
+      state=data; updateUI(); syncActiveRows()
+      if (data.playing&&data.current&&data.current.id!==oid) playAudio()
+      else if (!data.playing&&wp) { if (audio) { audio.pause(); audio.src=""; audio.load() } }
+    } else if (data === null) {
+      // Red caída / servidor apagado: marca estado offline y evita UI congelada
+      if (!offline) { offline = true; st("Sin conexión","error") }
+    }
+  })
+}
+
+function startPolling() { if (pt) clearInterval(pt); pt=setInterval(poll,2000) }
+
+// ── Events ──
+document.addEventListener("click", function(e) {
+  var t=e.target
+  if (t.classList.contains("rp")) { e.stopPropagation(); flash(t); playV(t.dataset.id); return }
+  if (t.classList.contains("ra")) { e.stopPropagation(); flash(t); addQ(t.dataset.id,t.dataset.tit,parseInt(t.dataset.dur)||0,t.dataset.up); return }
+  if (t.classList.contains("rd")) { e.stopPropagation(); flash(t); dwVideo(t.dataset.id,t.dataset.tit); return }
+  if (t.classList.contains("qp")) { e.stopPropagation(); flash(t); playV(t.dataset.id); return }
+  if (t.classList.contains("qw")) { e.stopPropagation(); flash(t); dwVideo(t.dataset.id,t.dataset.tit); return }
+  if (t.classList.contains("qd")) { e.stopPropagation(); remQ(parseInt(t.dataset.i)); return }
+  var id=t.id||(t.parentElement&&t.parentElement.id)
+  if (id==="playBtn"){toggleP();return}
+  if (id==="prevBtn"){prevT();return}
+  if (id==="nextBtn"){nextT();return}
+  if (id==="stopBtn"){stopP();return}
+  if (id==="searchBtn"){doSearch();return}
+  if (id==="tabPlay"){switchTab("play");return}
+  if (id==="tabQueue"){switchTab("queue");return}
+  if (id==="tabDl"){switchTab("dl");return}
+  if (id==="cleanDlBtn"){cleanDl();return}
+  if (id==="clearDlBtn"){cleanDl();return}
+})
+
+document.addEventListener("keydown",function(e) {
+  // e.repeat: evita toggles repetidos de play/pause al mantener pulsada la barra
+  if (e.code==="Space"&&e.ctrlKey&&!e.repeat){e.preventDefault();toggleP()}
+  if (e.code==="Enter"&&document.activeElement===$("q")&&!e.repeat){e.preventDefault();debouncedSearch()}
+})
+
+document.addEventListener("DOMContentLoaded",function(){startPolling();poll()})
+</script>
+</body>
+</html>
