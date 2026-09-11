@@ -121,7 +121,7 @@ class Resolver:
         y si falla, degrada a flat."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
-            r = self._run(self._args(["-J", "--format", "bestaudio", url]), timeout=8, check=True)
+            r = self._run(self._args(["-J", "--format", "bestaudio/best", url]), timeout=8, check=True)
             return json.loads(r.stdout)
         except Exception:
             pass
@@ -136,11 +136,11 @@ class Resolver:
         url = f"https://www.youtube.com/watch?v={video_id}"
         self.last_error = None
         strategies = [
-            {"f": "251/bestaudio", "e": None},
-            {"f": "251/bestaudio", "e": "youtube:player_client=tv"},
-            {"f": "251/bestaudio", "e": "youtube:player_client=web_embedded"},
-            {"f": "bestaudio", "e": "youtube:player_client=mweb"},
-            {"f": "bestaudio", "e": "youtube:player_client=ios"},
+            {"f": "251/bestaudio/best", "e": None},
+            {"f": "251/bestaudio/best", "e": "youtube:player_client=tv"},
+            {"f": "251/bestaudio/best", "e": "youtube:player_client=web_embedded"},
+            {"f": "bestaudio/best", "e": "youtube:player_client=mweb"},
+            {"f": "bestaudio/best", "e": "youtube:player_client=ios"},
         ]
         for s in strategies:
             try:

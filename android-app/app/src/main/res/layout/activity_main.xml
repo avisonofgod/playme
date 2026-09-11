@@ -14,25 +14,47 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:background="#0b1220"
-        android:padding="8dp"
-        android:gravity="center_vertical">
+        android:orientation="vertical"
+        android:background="#111a2e"
+        android:padding="6dp">
 
         <TextView
             android:id="@+id/status"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="12sp"
-            android:textColor="#e2e8f0"
+            android:textColor="#94a3b8"
+            android:textSize="11sp"
+            android:paddingBottom="4dp"
             android:text="Iniciando..." />
 
-        <Button
-            android:id="@+id/btnCookie"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="12sp"
-            android:text="Guardar cookie de YouTube" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnImport"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="11sp"
+                android:text="IMPORTAR cookies.txt" />
+
+            <Button
+                android:id="@+id/btnLogin"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="11sp"
+                android:text="INICIAR SESION YOUTUBE" />
+
+            <Button
+                android:id="@+id/btnReload"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.6"
+                android:textSize="11sp"
+                android:text="RECARGAR" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

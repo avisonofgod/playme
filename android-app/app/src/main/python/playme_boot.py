@@ -44,6 +44,16 @@ def start(data_dir):
         os.environ["PLAYME_YTDLP_INPROC"] = "1"
         os.environ["PLAYME_NO_FIREFOX"] = "1"
 
+        # Android: si el resolver nativo de Python falla (habitual en algunos moviles),
+        # se cae a java.net.InetAddress.
+        try:
+            import dns_java
+
+            dns_java.install()
+            dns_java.diag()
+        except Exception as e:
+            print("boot: dns_java no aplicado: %s" % e)
+
         import server  # importa el backend (resolver/player/transcoder/token_manager)
         threading.Thread(target=server.main, daemon=True, name="playme-server").start()
 

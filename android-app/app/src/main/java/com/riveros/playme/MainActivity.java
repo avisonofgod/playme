@@ -1,12 +1,12 @@
 package com.riveros.playme;
 
 import android.app.Activity;
-import android.os.Build;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
-import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -18,31 +18,23 @@ import android.widget.Toast;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 
-/**
- * PlayMe local: corre el backend Python (yt-dlp embebido) en 127.0.0.1 y lo muestra en un WebView.
- *
- * Cookie de YouTube: se obtiene del propio login de YouTube hecho en el WebView
- * (CookieManager) y se guarda como cookies.txt Netscape en filesDir, que es lo que
- * usa yt-dlp en el dispositivo. No hay servidor externo ni PC.
- */
 public class MainActivity extends Activity {
 
-    private static final String TAG = "PlayMeLocal";
-    private static final int PORT = 8191;
-    private static final String LOCAL_URL = "http://127.0.0.1:" + PORT + "/";
+    static final String TAG = "PlayMeLocal";
+    static final int PORT = 8191;
+    static final int REQ_COOKIES = 1001;
 
-    private WebView web;
-    private TextView status;
-    private Button btnCookie;
-    private File dataDir;
-    private File cookieFile;
-    private int retries = 0;
+    WebView web;
+    TextView status;
+    Button btnLogin, btnImport, btnReload;
+    File cookieFile;
+    boolean loginMode = false;
+    int retries = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,141 +43,186 @@ public class MainActivity extends Activity {
 
         web = findViewById(R.id.web);
         status = findViewById(R.id.status);
-        btnCookie = findViewById(R.id.btnCookie);
-
-        dataDir = getFilesDir();
-        cookieFile = new File(dataDir, "cookies.txt");
+        btnLogin = findViewById(R.id.btnLogin);
+        btnImport = findViewById(R.id.btnImport);
+        btnReload = findViewById(R.id.btnReload);
+        cookieFile = new File(getFilesDir(), "cookies.txt");
 
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        s.setLoadWithOverviewMode(true);
-        s.setUseWideViewPort(true);
-        if (Build.VERSION.SDK_INT >= 26) s.setSafeBrowsingEnabled(false);
-
         CookieManager.getInstance().setAcceptCookie(true);
-        if (Build.VERSION.SDK_INT >= 21) CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
         web.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 return false;
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                // Mientras el backend Python arranca, el puerto local aun no escucha: reintentar.
-                if (request.getUrl().toString().startsWith("http://127.0.0.1") && retries < 30) {
+            public void onPageFinished(WebView v, String url) {
+                if (!loginMode && url != null && url.contains("127.0.0.1:" + PORT)) {
+                    status.setText("PlayMe local activo (" + (hasCookie() ? "con cookie" : "sin cookie") + ")");
+                }
+            }
+
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest r, android.webkit.WebResourceError e) {
+                if (!loginMode && retries < 20) {
                     retries++;
-                    final WebView v = view;
-                    v.postDelayed(() -> v.loadUrl(LOCAL_URL), 1000);
+                    v.postDelayed(() -> v.loadUrl(localUrl()), 1000);
+                } else if (!loginMode) {
+                    status.setText("No responde el servidor local");
                 }
             }
         });
 
-        btnCookie.setOnClickListener(v -> guardarCookieYArrancar());
+        btnLogin.setOnClickListener(v -> {
+            if (!loginMode) {
+                loginMode = true;
+                btnLogin.setText("GUARDAR COOKIE DE YOUTUBE");
+                status.setText("1) Inicia sesion en YouTube  2) Pulsa GUARDAR COOKIE");
+                web.loadUrl("https://m.youtube.com/");
+            } else {
+                guardarCookie();
+            }
+        });
 
-        if (tieneCookie()) {
+        btnImport.setOnClickListener(v -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            i.addCategory(Intent.CATEGORY_OPENABLE);
+            i.setType("*/*");
+            startActivityForResult(i, REQ_COOKIES);
+        });
+
+        btnReload.setOnClickListener(v -> {
+            loginMode = false;
+            btnLogin.setText("INICIAR SESION YOUTUBE");
             arrancar();
-        } else {
-            modoLogin();
-        }
+        });
+
+        status.setText("Iniciando PlayMe local...");
+        arrancar();
     }
 
-    private boolean tieneCookie() {
+    String localUrl() {
+        return "http://127.0.0.1:" + PORT + "/";
+    }
+
+    boolean hasCookie() {
         if (!cookieFile.isFile() || cookieFile.length() == 0) return false;
-        try (BufferedReader r = new BufferedReader(new FileReader(cookieFile))) {
-            String line;
-            while ((line = r.readLine()) != null) {
-                if (!line.startsWith("#") && line.contains("\tSID\t")) return true;
+        try {
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(cookieFile));
+            String l;
+            while ((l = br.readLine()) != null) {
+                if (l.contains("\tSID\t") || l.startsWith("SID\t") || l.contains("\tHSID\t")) {
+                    br.close();
+                    return true;
+                }
             }
-        } catch (IOException e) {
-            Log.w(TAG, "leyendo cookies.txt", e);
+            br.close();
+        } catch (Exception ignored) {
         }
         return false;
     }
 
-    private void modoLogin() {
-        status.setText("1) Inicia sesion en YouTube  2) Pulsa GUARDAR COOKIE");
-        btnCookie.setText("Guardar cookie de YouTube");
-        web.loadUrl("https://m.youtube.com/");
+    void arrancar() {
+        status.setText("Iniciando PlayMe local...");
+        new Thread(() -> {
+            try {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
+                Object r = Python.getInstance().getModule("playme_boot")
+                        .callAttr("start", getFilesDir().getAbsolutePath()).toJava(Object.class);
+                boolean ok = String.valueOf(r).equalsIgnoreCase("true");
+                runOnUiThread(() -> {
+                    if (ok) {
+                        retries = 0;
+                        status.setText(hasCookie() ? "PlayMe local activo (con cookie)" : "YouTube publico OK - importa cookies para mixes");
+                        web.loadUrl(localUrl());
+                    } else {
+                        status.setText("Python arranco pero el puerto no respondio");
+                    }
+                });
+            } catch (Throwable e) {
+                Log.e(TAG, "boot", e);
+                runOnUiThread(() -> status.setText("Error Python: " + e));
+            }
+        }).start();
     }
 
-    private void guardarCookieYArrancar() {
-        CookieManager cm = CookieManager.getInstance();
-        String ck = cm.getCookie("https://www.youtube.com");
+    void guardarCookie() {
+        String ck = CookieManager.getInstance().getCookie("https://www.youtube.com");
         if (ck == null || !ck.contains("SID=")) {
-            String m = cm.getCookie("https://m.youtube.com");
-            if (m != null && m.contains("SID=")) ck = m;
+            ck = CookieManager.getInstance().getCookie("https://m.youtube.com");
         }
         if (ck == null || !ck.contains("SID=")) {
-            Toast.makeText(this, "Sin sesion: inicia sesion en YouTube primero", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Sin sesion en YouTube: inicia sesion primero", Toast.LENGTH_LONG).show();
             return;
         }
         int n = escribirNetscape(ck);
-        Toast.makeText(this, "Cookie guardada (" + n + " cookies)", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Cookie guardada (" + n + " cookies)", Toast.LENGTH_LONG).show();
+        loginMode = false;
+        btnLogin.setText("INICIAR SESION YOUTUBE");
         arrancar();
     }
 
-    /** Convierte el header Cookie ("a=b; c=d") al formato Netscape que espera yt-dlp. */
-    private int escribirNetscape(String header) {
+    int escribirNetscape(String cookieHeader) {
         long exp = System.currentTimeMillis() / 1000 + 365L * 24 * 3600;
         int n = 0;
-        StringBuilder sb = new StringBuilder("# Netscape HTTP Cookie File\n");
-        sb.append("# PlayMe Android - cookies capturadas del login en el WebView\n");
-        for (String part : header.split(";")) {
-            String p = part.trim();
-            int eq = p.indexOf('=');
-            if (eq <= 0) continue;
-            String name = p.substring(0, eq).trim();
-            String value = p.substring(eq + 1).trim();
-            if (name.isEmpty()) continue;
-            sb.append(".youtube.com\tTRUE\t/\tTRUE\t").append(exp).append('\t')
-              .append(name).append('\t').append(value).append('\n');
-            n++;
-        }
-        try (FileWriter w = new FileWriter(cookieFile, false)) {
-            w.write(sb.toString());
-        } catch (IOException e) {
-            Log.e(TAG, "escribiendo cookies.txt", e);
+        try (FileOutputStream fo = new FileOutputStream(cookieFile)) {
+            for (String pair : cookieHeader.split(";")) {
+                String p = pair.trim();
+                int eq = p.indexOf('=');
+                if (eq <= 0) continue;
+                String name = p.substring(0, eq);
+                String value = p.substring(eq + 1);
+                if (name.isEmpty() || value.isEmpty()) continue;
+                String line = ".youtube.com\tTRUE\t/\tTRUE\t" + exp + "\t" + name + "\t" + value + "\n";
+                fo.write(line.getBytes("UTF-8"));
+                n++;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "escribirNetscape", e);
         }
         return n;
     }
 
-    private void arrancar() {
-        status.setText("Iniciando PlayMe local (yt-dlp embebido)...");
-        btnCookie.setText("Actualizar cookie de YouTube");
-        final Activity self = this;
-        new Thread(() -> {
-            String msg;
-            boolean ok = false;
-            try {
-                if (!Python.isStarted()) Python.start(new AndroidPlatform(self));
-                Object r = Python.getInstance().getModule("playme_boot")
-                        .callAttr("start", dataDir.getAbsolutePath()).toJava(Object.class);
-                ok = Boolean.TRUE.equals(r) || "True".equals(String.valueOf(r));
-                msg = ok ? ("PlayMe local: " + LOCAL_URL) : "El servidor no arranco";
-            } catch (Throwable e) {
-                Log.e(TAG, "boot python", e);
-                msg = "Error Python: " + e.getMessage();
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_COOKIES) return;
+        if (res != RESULT_OK || data == null || data.getData() == null) {
+            status.setText("Importacion cancelada");
+            return;
+        }
+        Uri uri = data.getData();
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             OutputStream out = new FileOutputStream(cookieFile)) {
+            byte[] buf = new byte[8192];
+            int r;
+            long total = 0;
+            while ((r = in.read(buf)) > 0) {
+                out.write(buf, 0, r);
+                total += r;
             }
-            final boolean fOk = ok;
-            final String fMsg = msg;
-            runOnUiThread(() -> {
-                status.setText(fMsg);
-                if (fOk) {
-                    retries = 0;
-                    web.loadUrl(LOCAL_URL);
-                }
-            });
-        }).start();
+            out.flush();
+            boolean ok = hasCookie();
+            status.setText(ok ? "Cookies importadas (" + total + " B)" : "Archivo sin SID/HSID");
+            Toast.makeText(this, ok ? "Cookies OK" : "Ese archivo no tiene la cookie de YouTube", Toast.LENGTH_LONG).show();
+            if (ok) arrancar();
+        } catch (Exception e) {
+            Log.e(TAG, "import", e);
+            status.setText("Error importando: " + e.getMessage());
+        }
     }
 
     @Override
     public void onBackPressed() {
-        if (web.canGoBack()) {
+        if (web != null && web.canGoBack() && !loginMode) {
             web.goBack();
         } else {
             super.onBackPressed();
