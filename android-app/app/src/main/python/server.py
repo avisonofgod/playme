@@ -397,43 +397,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(*err_res("No stream", 404))
 
-    def _proxy_ytdlp(self, video_id):
-        """Streaming via yt-dlp a stdout (subprocess). El navegador recibe el
-        audio completo sin cortes (googlevideo rechaza chunks >1MB y rangos
-        que no empiezan en 0)."""
-        if not video_id:
-            self._send(*err_res("No stream", 404))
-            return
-        # ruta absoluta: el PATH del proceso server puede no incluir /usr/local/bin
-        ytdlp = shutil.which("yt-dlp") or "/usr/local/bin/yt-dlp"
-        cmd = [
-            ytdlp, "--cookies", COOKIES_PATH, "--no-playlist",
-            "-f", "bestaudio[ext=m4a]/bestaudio",
-            "-o", "-",
-            f"https://www.youtube.com/watch?v={video_id}",
-        ]
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                    start_new_session=True)
-        except Exception as e:
-            logger.error(f"ytdlp spawn: {e}")
-            self._send(*err_res("Stream error", 502))
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "audio/mp4")
-        self.send_header("Cache-Control", "no-cache")
-        self.end_headers()
-        try:
-            while True:
-                c = proc.stdout.read(65536)
-                if not c:
-                    break
-                self.wfile.write(c)
-                self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        finally:
-            _kill_group_runner(proc)  # kill de grupo (runner): no seguir descargando (mata hijoY nietos)
 
     def _serve_file(self, path):
         sz = os.path.getsize(path)
@@ -537,10 +500,12 @@ class Handler(BaseHTTPRequestHandler):
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
                 if player.play(vid):
-                    self._send(*json_res({"ok": True, **player.get_state()}))
+                    self._send(*json_res({"ok": True, "mp3": os.environ.get("PLAYME_NO_CONVERT") != "1", **player.get_state()}))
                 else:
                     self._send(*err_res(player.last_error or "Play failed", 500))
             elif path == "/api/convert":
+                if os.environ.get("PLAYME_NO_CONVERT") == "1":
+                    self._send(*json_res({"ok": False, "error": "mp3 no disponible en la app local"})); return
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
                 title = data.get("title", vid)
@@ -624,7 +589,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     os.makedirs(STATIC, exist_ok=True)
     transcoder.cleanup()
-    threading.Thread(target=token_mgr.refresh_loop, daemon=True).start()
+    if os.environ.get("PLAYME_NO_FIREFOX") != "1":
+        threading.Thread(target=token_mgr.refresh_loop, daemon=True).start()
 
     class Threaded(socketserver.ThreadingMixIn, HTTPServer):
         allow_reuse_address = True

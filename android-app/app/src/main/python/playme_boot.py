@@ -42,9 +42,10 @@ def start(data_dir):
         os.environ["PLAYME_CACHE_DIR"] = cache
         os.environ["PLAYME_LOG_DIR"] = logs
         os.environ["PLAYME_STATIC"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-        os.environ["PLAYME_YTDLP_PYMOD"] = "1"
         os.environ["PLAYME_YTDLP_INPROC"] = "1"
         os.environ["PLAYME_NO_FIREFOX"] = "1"
+        os.environ["PLAYME_NO_BG_DOWNLOAD"] = "1"
+        os.environ["PLAYME_NO_CONVERT"] = "1"
 
         # Android: si el resolver nativo de Python falla (habitual en algunos moviles),
         # se cae a java.net.InetAddress.
@@ -52,7 +53,6 @@ def start(data_dir):
             import dns_java
 
             dns_java.install()
-            dns_java.diag()
         except Exception as e:
             print("boot: dns_java no aplicado: %s" % e)
 

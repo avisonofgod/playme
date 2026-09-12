@@ -86,6 +86,7 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 <div class="t" id="npTitle">—</div>
 <div class="m" id="npMeta">—</div>
 <div id="npBadge"></div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="range" id="pbar" min="0" max="1000" value="0" style="flex:1"><span id="ptime" style="font-size:0.75em;color:#888;min-width:86px;text-align:right">0:00 / 0:00</span></div>
 </div>
 <div id="ctrl">
 <button id="prevBtn" disabled>⏮</button>
@@ -113,6 +114,9 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 
 <script>
 var state = {}
+function fmtT(s){ s=Math.floor(s||0); return Math.floor(s/60)+":"+("0"+(s%60)).slice(-2) }
+function bindSeek(){ var b=$("pbar"); if(!b) return; b.onchange=function(){ if(audio&&audio.duration&&isFinite(audio.duration)) audio.currentTime=audio.duration*this.value/1000 } }
+document.addEventListener("DOMContentLoaded", bindSeek)
 var audio = null
 var pt = null
 var dlTimer = null
@@ -153,6 +157,13 @@ function playAudio() {
     audio = new Audio(); audio.volume = 0.8
     audio.src = "/api/stream?_=" + Date.now(); audio.load()
     audio.play()["catch"](function(e) { if (e.name !== "AbortError") st("Error: "+e.message, "error") })
+    audio.addEventListener("timeupdate", function() {
+      var b=$("pbar"), t=$("ptime")
+      if (b && audio.duration && isFinite(audio.duration)) {
+        b.value = Math.round(audio.currentTime/audio.duration*1000)
+        if (t) t.textContent = fmtT(audio.currentTime)+" / "+fmtT(audio.duration)
+      }
+    })
   }
 }
 
@@ -347,6 +358,12 @@ function poll() {
       if (offline) { offline = false; st("Listo","success") } // recuperado
       var oid=state.current?state.current.id:null, wp=state.playing
       state=data; updateUI(); syncActiveRows()
+      // pausa/reanudacion REALES del <audio> (antes el boton era decorativo)
+      if (audio) { if (data.paused && !audio.paused) audio.pause()
+                   else if (!data.paused && audio.paused && data.playing) audio.play()["catch"](function(){}) }
+      // sin ffmpeg en Android no hay mp3: se oculta la pestana Descargas (mp3=false)
+      var tdl=$("tabDl"), pdl=$("panelDl")
+      if (tdl) { if (data.mp3 === false) { tdl.style.display="none"; if (pdl && pdl.className.indexOf("active")>=0) switchTab("play") } else { tdl.style.display="" } }
       if (data.playing&&data.current&&data.current.id!==oid) playAudio()
       else if (!data.playing&&wp) { if (audio) { audio.pause(); audio.src=""; audio.load() } }
     } else if (data === null) {

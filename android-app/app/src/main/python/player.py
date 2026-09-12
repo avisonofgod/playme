@@ -52,8 +52,9 @@ class Player:
                 logger.error(f"no stream for {video_id}: {self.last_error}")
                 return False
             mode = "proxy"
-            t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
-            t.start()
+            if os.environ.get("PLAYME_NO_BG_DOWNLOAD") != "1":
+                t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
+                t.start()
         track = {
             "id": video_id,
             "title": info.get("title", f"YouTube {video_id}"),
@@ -162,7 +163,8 @@ class Player:
             self.idx += delta  # revertir el desplazamiento
 
     def toggle_pause(self):
-        self.paused = not self.paused
+        with self._lock:
+            self.paused = not self.paused
         return self.paused
 
     def add_queue(self, video_id, title=None, duration=0, uploader=""):

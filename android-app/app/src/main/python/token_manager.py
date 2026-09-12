@@ -13,7 +13,10 @@ import os
 import threading
 import time
 
-from firefox_cookies import FirefoxCookiesExtractor
+try:
+    from firefox_cookies import FirefoxCookiesExtractor
+except Exception:  # Android: modulo no empaquetado
+    FirefoxCookiesExtractor = None
 
 logger = logging.getLogger(__name__)
 
