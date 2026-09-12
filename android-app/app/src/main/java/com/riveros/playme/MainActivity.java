@@ -1,12 +1,15 @@
 package com.riveros.playme;
 
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.URLUtil;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -57,6 +60,24 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
 
+        // Descargas: el WebView pide /api/download/... y se guardan con DownloadManager
+        web.setDownloadListener((url, ua, cd, mt, len) -> {
+            try {
+                String name = URLUtil.guessFileName(url, cd, mt);
+                DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
+                r.setTitle(name);
+                r.setMimeType(mt);
+                r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                dm.enqueue(r);
+                status.setText("Descargando: " + name);
+                Log.i(TAG, "descarga: " + url + " -> " + name);
+            } catch (Throwable e) {
+                Log.e(TAG, "download", e);
+                status.setText("Error al descargar: " + e.getMessage());
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {

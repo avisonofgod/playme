@@ -127,6 +127,11 @@ GET /api/stream
 
 ## Conversión y Descarga (mp3)
 
+> **En la app Android (`android-app/`)**: sin ffmpeg no hay mp3. La pestaña Descargas
+> baja el AUDIO ORIGINAL del cache (`GET /api/download/audio/{id}`, webm/m4a) y el
+> movil lo guarda en Descargas con DownloadManager. El mp3 sigue en el servidor Linux.
+
+
 ```
 1. DW (por fila o en cola) → POST /api/convert {"video_id","title"}
      → thread en background _run_conv(video_id)

@@ -340,7 +340,7 @@ function renderDl(convs) {
       + '<span style="flex:0 0 60px;text-align:center">'
     if (c.status==="ready") {
       // Sin ?title= ni download=: el backend define el nombre via Content-Disposition
-      h += '<a class="dl-ok" href="/api/download/mp3/'+id+'">⬇</a>'
+      h += '<a class="dl-ok" href="'+(c.url||("/api/download/mp3/"+id))+'">⬇</a>'
     } else if (c.status==="error") {
       h += '<span class="dl-err">Error</span>'
     } else {
@@ -363,7 +363,7 @@ function poll() {
                    else if (!data.paused && audio.paused && data.playing) audio.play()["catch"](function(){}) }
       // sin ffmpeg en Android no hay mp3: se oculta la pestana Descargas (mp3=false)
       var tdl=$("tabDl"), pdl=$("panelDl")
-      if (tdl) { if (data.mp3 === false) { tdl.style.display="none"; if (pdl && pdl.className.indexOf("active")>=0) switchTab("play") } else { tdl.style.display="" } }
+      if (tdl) { tdl.style.display=""; tdl.textContent = data.mp3 === false ? "⬇ Descargas (audio)" : "⬇ Descargas" }
       if (data.playing&&data.current&&data.current.id!==oid) playAudio()
       else if (!data.playing&&wp) { if (audio) { audio.pause(); audio.src=""; audio.load() } }
     } else if (data === null) {

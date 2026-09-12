@@ -188,6 +188,31 @@ def build_stream_request(url, range_h):
     return req
 
 
+def _audio_convert(vid, title):
+    """Android sin ffmpeg: descarga el audio original y sirve /api/download/audio/<vid>."""
+    url = "/api/download/audio/" + vid
+    if transcoder.is_cached(vid):
+        with _conv_lock:
+            _conversions[vid] = {"status": "ready", "title": title, "url": url}
+        return json_res({"ok": True, "status": "ready", "url": url})
+    with _conv_lock:
+        st = (_conversions.get(vid) or {}).get("status")
+        if st in ("queued", "converting"):
+            return json_res({"ok": True, "status": st})
+        _conversions[vid] = {"status": "converting", "title": title, "url": url}
+
+    def _job():
+        try:
+            transcoder.download_bg(vid, resolver)
+            r = "ready" if transcoder.is_cached(vid) else "error"
+        except Exception as e:
+            logger.warning("audio dl fail %s: %s" % (vid, e)); r = "error"
+        with _conv_lock:
+            _conversions[vid] = {"status": r, "title": title, "url": url}
+
+    threading.Thread(target=_job, daemon=True).start()
+    return json_res({"ok": True, "status": "queued"})
+
 def sanitize_filename(title, video_id):
     """Regla UNICA de nombre de archivo descargado (fuente de verdad del backend).
     Usa la antigua regla de _serve_mp3, ahora expuesta y reutilizable.
@@ -324,6 +349,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(*json_res({"ok": True, "ip": _detect_public_ip()}))
             elif path == "/api/stream":
                 self._handle_stream()
+            elif path.startswith("/api/download/audio/"):
+                self._serve_audio(path[len("/api/download/audio/"):].split("/")[0].split("?")[0])
             elif path.startswith("/api/download/mp3/"):
                 vid = path[len("/api/download/mp3/"):].split("/")[0].split("?")[0]
                 self._serve_mp3(vid)
@@ -333,6 +360,33 @@ class Handler(BaseHTTPRequestHandler):
             logger.exception(f"GET {path}: {e}")
             try: self._send(*err_res(str(e), 500))
             except: pass
+
+    def _serve_audio(self, video_id):
+        """Sirve el audio original cacheado (Android sin ffmpeg)."""
+        path = transcoder.path(video_id)
+        if not (os.path.isfile(path) and os.path.getsize(path) > 0):
+            self._send(*err_res("Not ready", 404)); return
+        with _conv_lock:
+            title = (_conversions.get(video_id) or {}).get("title")
+        with open(path, "rb") as f:
+            head = f.read(12)
+        if head[4:8] == b"ftyp":
+            ctype, ext = "audio/mp4", ".m4a"
+        else:
+            ctype, ext = "audio/webm", ".webm"
+        fname = sanitize_filename(title, video_id) + ext
+        sz = os.path.getsize(path)
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(sz))
+        self.send_header("Content-Disposition", 'attachment; filename="%s"' % fname)
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        with open(path, "rb") as f:
+            while True:
+                c = f.read(65536)
+                if not c: break
+                self.wfile.write(c)
 
     def _serve_mp3(self, video_id):
         """Sirve archivo mp3 si ya existe. El nombre viene de la unica fuente
@@ -504,10 +558,10 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self._send(*err_res(player.last_error or "Play failed", 500))
             elif path == "/api/convert":
-                if os.environ.get("PLAYME_NO_CONVERT") == "1":
-                    self._send(*json_res({"ok": False, "error": "mp3 no disponible en la app local"})); return
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
+                if os.environ.get("PLAYME_NO_CONVERT") == "1":
+                    self._send(*_audio_convert(vid, data.get("title", vid))); return
                 title = data.get("title", vid)
                 mp3_path = os.path.join(MP3_DIR, f"{vid}.mp3")
                 # Si ya existe listo
