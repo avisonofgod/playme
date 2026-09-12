@@ -29,9 +29,13 @@ REFRESH_SECONDS = int(os.environ.get("PLAYME_REFRESH_SECONDS", "6")) * 3600  # 6
 class TokenManager:
     def __init__(self, profile_db=None, copy_fn=None, connect_fn=None):
         self.sapisid = None
-        self.firefox = FirefoxCookiesExtractor(
-            profile_db or PROFILE_DB, copy_fn=copy_fn, connect_fn=connect_fn
-        )
+        # Android: el modulo Firefox no se empaqueta (o PLAYME_NO_FIREFOX=1)
+        if FirefoxCookiesExtractor is None or os.environ.get("PLAYME_NO_FIREFOX") == "1":
+            self.firefox = None
+        else:
+            self.firefox = FirefoxCookiesExtractor(
+                profile_db or PROFILE_DB, copy_fn=copy_fn, connect_fn=connect_fn
+            )
         self._load()
 
     # ── fuente primaria: Firefox ──────────────────────────────────────────
@@ -39,7 +43,7 @@ class TokenManager:
         """Intenta llenar cookies.txt desde Firefox. Retorna True si logro
         escribir con cookies de sesion vigentes. En Android (PLAYME_NO_FIREFOX=1)
         no hay Firefox: la cookie la aporta la app desde el WebView."""
-        if os.environ.get("PLAYME_NO_FIREFOX") == "1":
+        if os.environ.get("PLAYME_NO_FIREFOX") == "1" or self.firefox is None:
             return False
         written = self.firefox.write_file(COOKIES)
         return bool(written)
