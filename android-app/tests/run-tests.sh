@@ -48,7 +48,7 @@ import os, time, playme_boot
 os.environ["PLAYME_TEST_DIR"] = os.environ["PLAYME_TEST_DIR"]
 print("start:", playme_boot.start(os.environ["PLAYME_TEST_DIR"]))
 print("ytdlp:", playme_boot.ytdlp_version())
-time.sleep(240)
+time.sleep(420)
 PY
 BOOTPID=$!
 for i in $(seq 1 40); do
