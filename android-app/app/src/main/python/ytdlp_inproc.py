@@ -64,18 +64,22 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
         finally:
             _release()
 
-    if not _LOCK.acquire(timeout=tmo):
-        err.write("ERROR: yt-dlp ocupado mas de %ss\n" % tmo)
+    # Esperar el lock: si una descarga esta en curso, la reproduccion no debe
+    # fallar al instante; se espera hasta PLAYME_LOCK_WAIT (60s por defecto).
+    wait = int(os.environ.get("PLAYME_LOCK_WAIT", "60") or 60)
+    if not _LOCK.acquire(timeout=max(tmo, wait)):
+        err.write("ERROR: yt-dlp ocupado mas de %ss\n" % max(tmo, wait))
         return _Result(124, b"", err.getvalue().encode())
 
     t = threading.Thread(target=_job, daemon=True)
     t.start()
     t.join(tmo)
     if t.is_alive():
-        # Se colgo: liberamos el lock para no bloquear el resto de la API y
-        # devolvemos timeout (el hilo queda como daemon hasta que muera).
-        _release()
-        err.write("ERROR: timeout de yt-dlp (%ss); comando abortado\n" % tmo)
+        # Se colgo. NO liberamos el lock: el hilo sigue dentro de yt-dlp y
+        # liberar aqui permitiria comandos en paralelo sobre la misma libreria
+        # (se corrompe y todo queda en "resolving"). El _job libera al morir;
+        # mientras, los siguientes comandos fallan rapido con "ocupado".
+        err.write("ERROR: timeout de yt-dlp (%ss); comando colgado\n" % tmo)
         holder["code"] = 124
 
     so, se = out.getvalue(), err.getvalue()

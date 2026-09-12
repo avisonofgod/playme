@@ -40,8 +40,9 @@ python3 -m compileall -q . >/dev/null 2>&1 && chk "sintaxis python portado" 1 ||
 # 3) Host: arranque + busqueda + play + stream (mismo codigo que corre en el movil)
 SIM=$(mktemp -d /tmp/playme-tests.XXXXXX)
 mkdir -p "$SIM"
-# cookie SIN cabecera Netscape: la suite verifica que se repara sola
-printf '.youtube.com\tTRUE\t/\tTRUE\t1900000000\tSID\tfake-sid-for-test\n' > "$SIM/cookies.txt"
+# cookie REAL sin cabecera Netscape: prueba la reparacion Y una sesion valida
+REAL=/home/proyectos/Playme/cookies.txt
+if [ -f "$REAL" ]; then sed '1,2d' "$REAL" > "$SIM/cookies.txt"; else printf '.youtube.com\tTRUE\t/\tTRUE\t1900000000\tSID\tfake\n' > "$SIM/cookies.txt"; fi
 
 PORT=$PORT PLAYME_TEST_DIR="$SIM" PLAYME_NO_CONVERT=1 PLAYME_NO_BG_DOWNLOAD=1 python3 - <<'PY' > "$SIM/boot.log" 2>&1 &
 import os, time, playme_boot
@@ -76,8 +77,17 @@ S=$(curl -s -m 15 "http://127.0.0.1:$PORT/api/state")
 echo "$S" | grep -q '"playing": true' && chk "play activo" 1 || bad "play activo"
 C=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -r 0-65535 "http://127.0.0.1:$PORT/api/stream")
 [ "$C" = "206" ] && chk "stream HTTP 206" 1 || bad "stream HTTP 206 (got $C)"
+# descarga de audio original (Android sin ffmpeg)
+curl -s -m 30 -X POST "http://127.0.0.1:$PORT/api/convert" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ","title":"t"}' >/dev/null
+for i in $(seq 1 40); do
+  curl -s -m 10 -X POST "http://127.0.0.1:$PORT/api/conversions" -H 'Content-Type: application/json' -d '{}' | grep -q '"ready"' && break
+  sleep 3
+done
+CODE=$(curl -s -m 180 -o "$SIM/dl.bin" -w '%{http_code}' "http://127.0.0.1:$PORT/api/download/audio/dQw4w9WgXcQ")
+SZ=$(stat -c%s "$SIM/dl.bin" 2>/dev/null || echo 0)
+if [ "$CODE" = "200" ] && [ "$SZ" -gt 100000 ]; then chk "descarga audio original ($SZ bytes)" 1; else bad "descarga audio original (http=$CODE sz=$SZ)"; tail -4 "$SIM/boot.log"; fi
+
 kill $BOOTPID 2>/dev/null; pkill -f "playme_boot" 2>/dev/null
-rm -rf "$SIM"
 
 # 4) Dispositivo (opcional)
 if [ "${1:-}" = "--device" ]; then
@@ -93,15 +103,6 @@ if [ "${1:-}" = "--device" ]; then
   fi
 fi
 
-# descarga de audio original (Android sin ffmpeg)
-curl -s -m 30 -X POST "http://127.0.0.1:$PORT/api/convert" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ","title":"t"}' >/dev/null
-for i in $(seq 1 40); do
-  curl -s -m 10 -X POST "http://127.0.0.1:$PORT/api/conversions" -H 'Content-Type: application/json' -d '{}' | grep -q '"ready"' && break
-  sleep 3
-done
-CODE=$(curl -s -m 180 -o "$SIM/dl.bin" -w '%{http_code}' "http://127.0.0.1:$PORT/api/download/audio/dQw4w9WgXcQ")
-SZ=$(stat -c%s "$SIM/dl.bin" 2>/dev/null || echo 0)
-if [ "$CODE" = "200" ] && [ "$SZ" -gt 100000 ]; then chk "descarga audio original ($SZ bytes)" 1; else bad "descarga audio original (http=$CODE sz=$SZ)"; fi
-
+[ $FAIL -gt 0 ] && { echo "--- boot.log ($SIM) ---"; tail -20 "$SIM/boot.log"; }
 echo "== resultado: $([ $FAIL -eq 0 ] && echo TODO-OK || echo "$FAIL fallos") =="
 exit $FAIL
