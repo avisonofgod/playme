@@ -43,12 +43,12 @@ mkdir -p "$SIM"
 # cookie SIN cabecera Netscape: la suite verifica que se repara sola
 printf '.youtube.com\tTRUE\t/\tTRUE\t1900000000\tSID\tfake-sid-for-test\n' > "$SIM/cookies.txt"
 
-PORT=$PORT PLAYME_TEST_DIR="$SIM" python3 - <<'PY' > "$SIM/boot.log" 2>&1 &
+PORT=$PORT PLAYME_TEST_DIR="$SIM" PLAYME_NO_CONVERT=1 PLAYME_NO_BG_DOWNLOAD=1 python3 - <<'PY' > "$SIM/boot.log" 2>&1 &
 import os, time, playme_boot
 os.environ["PLAYME_TEST_DIR"] = os.environ["PLAYME_TEST_DIR"]
 print("start:", playme_boot.start(os.environ["PLAYME_TEST_DIR"]))
 print("ytdlp:", playme_boot.ytdlp_version())
-time.sleep(150)
+time.sleep(240)
 PY
 BOOTPID=$!
 for i in $(seq 1 40); do
@@ -92,6 +92,16 @@ if [ "${1:-}" = "--device" ]; then
     echo "SKIP device (no conectado)"
   fi
 fi
+
+# descarga de audio original (Android sin ffmpeg)
+curl -s -m 30 -X POST "http://127.0.0.1:$PORT/api/convert" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ","title":"t"}' >/dev/null
+for i in $(seq 1 40); do
+  curl -s -m 10 -X POST "http://127.0.0.1:$PORT/api/conversions" -H 'Content-Type: application/json' -d '{}' | grep -q '"ready"' && break
+  sleep 3
+done
+CODE=$(curl -s -m 180 -o "$SIM/dl.bin" -w '%{http_code}' "http://127.0.0.1:$PORT/api/download/audio/dQw4w9WgXcQ")
+SZ=$(stat -c%s "$SIM/dl.bin" 2>/dev/null || echo 0)
+if [ "$CODE" = "200" ] && [ "$SZ" -gt 100000 ]; then chk "descarga audio original ($SZ bytes)" 1; else bad "descarga audio original (http=$CODE sz=$SZ)"; fi
 
 echo "== resultado: $([ $FAIL -eq 0 ] && echo TODO-OK || echo "$FAIL fallos") =="
 exit $FAIL
