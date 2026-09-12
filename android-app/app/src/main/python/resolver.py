@@ -52,12 +52,38 @@ class Resolver:
                     except OSError:
                         # Android/SELinux: copy2 falla al copiar xattrs; copiamos solo datos
                         shutil.copyfile(src, dst)
+                # Reparacion: yt-dlp exige la cabecera Netscape; si el archivo de origen
+                # viene sin ella (p.ej. capturado del WebView por una version previa de la
+                # app), se anade aqui para que yt-dlp lo acepte.
+                try:
+                    with open(dst, "rb") as f:
+                        head = f.read(64)
+                    if not (head.startswith(b"# Netscape") or head.startswith(b"# HTTP Cookie")):
+                        with open(dst, "rb") as f:
+                            body = f.read()
+                        with open(dst, "wb") as f:
+                            f.write(b"# Netscape HTTP Cookie File\n")
+                            f.write(body)
+                        logger.warning("cookies: cabecera Netscape anadida a %s", dst)
+                except Exception as e:
+                    logger.warning("cookies: no se pudo verificar cabecera: %s", e)
+
+    def _cookies_valid(self):
+        """True si COOKIES_TEMP existe y tiene formato Netscape reconocible."""
+        try:
+            with open(COOKIES_TEMP, "rb") as f:
+                head = f.read(64)
+            return head.startswith(b"# Netscape") or head.startswith(b"# HTTP Cookie")
+        except Exception:
+            return False
 
     def _args(self, extra=None):
         self._sync_cookies()  # asegura copia fresca antes de cada comando
         a = list(self.ytdlp_cmd)
-        if os.path.isfile(COOKIES_TEMP) and os.path.getsize(COOKIES_TEMP) > 0:
+        if self._cookies_valid() and os.path.getsize(COOKIES_TEMP) > 0:
             a += ["--cookies", COOKIES_TEMP]
+        else:
+            logger.warning("cookies: archivo no valido, se omite --cookies")
         if extra:
             a += extra
         return a

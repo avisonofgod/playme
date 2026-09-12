@@ -177,6 +177,10 @@ public class MainActivity extends Activity {
         long exp = System.currentTimeMillis() / 1000 + 365L * 24 * 3600;
         int n = 0;
         try (FileOutputStream fo = new FileOutputStream(cookieFile)) {
+            // yt-dlp (y el cookiejar de Python) exigen la cabecera Netscape; sin ella
+            // el archivo se rechaza con "does not look like a Netscape format cookies file".
+            fo.write("# Netscape HTTP Cookie File\n".getBytes("UTF-8"));
+            fo.write("# Generado por PlayMe (login YouTube del dispositivo)\n".getBytes("UTF-8"));
             for (String pair : cookieHeader.split(";")) {
                 String p = pair.trim();
                 int eq = p.indexOf('=');
