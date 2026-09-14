@@ -11,8 +11,11 @@ Correctitud:
 """
 import contextlib
 import io
+import logging
 import os
 import threading
+
+logger = logging.getLogger("ytdlp_inproc")
 
 _LOCK = threading.Lock()  # yt-dlp no es reentrante: serializamos
 DEFAULT_TIMEOUT = 300     # segundos; sin timeout, un cuelgue bloquea toda la API
@@ -92,6 +95,9 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
         except Exception:
             pass
     res = _Result(code, so, se)
+    if code:
+        _e = se.decode("utf-8", "replace") if isinstance(se, bytes) else str(se)
+        logger.warning("inproc rc=%s args=%s | %s" % (code, " ".join([str(a) for a in argv[:8]]), _e.strip()[-300:]))
     if check and code != 0:
         raise RuntimeError("yt-dlp rc=%s: %s" % (code, (se[:200] if isinstance(se, bytes) else se[:200])))
     return res

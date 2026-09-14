@@ -43,7 +43,12 @@ class Transcoder:
             "--no-part", "--no-mtime", url
         ]
         try:
-            self._runner(args, timeout=120)
+            res = self._runner(args, timeout=120)
+            rc = getattr(res, "returncode", 0)
+            if rc:
+                se = getattr(res, "stderr", b"") or b""
+                if isinstance(se, bytes): se = se.decode("utf-8", "replace")
+                logger.warning("dl rc=%s: %s" % (rc, se.strip()[-400:]))
             if os.path.isfile(part) and os.path.getsize(part) > 0:
                 os.rename(part, self.path(vid))
                 logger.info(f"cache ok: {vid} ({self.size(vid)} bytes)")

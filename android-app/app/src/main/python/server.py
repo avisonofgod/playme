@@ -338,12 +338,16 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 self._static("index.html", "text/html")
+            elif path == "/api/netdiag":
+                import netdiag
+                self._send(*json_res(netdiag.run())); return
             elif path == "/api/state":
                 state = player.get_state()
                 # agregar estado de conversiones activas
                 with _conv_lock:
                     convs = dict(_conversions)
-                state["conversions"] = {k: {"status": v["status"]} for k, v in convs.items()}
+                state["conversions"] = {k: {"status": v["status"], "url": v.get("url", "")} for k, v in convs.items()}
+                state["mp3"] = os.environ.get("PLAYME_NO_CONVERT") != "1"
                 self._send(*json_res({"ok": True, **state}))
             elif path == "/api/ip":
                 self._send(*json_res({"ok": True, "ip": _detect_public_ip()}))
@@ -442,12 +446,12 @@ class Handler(BaseHTTPRequestHandler):
             vid = player.current.get("id") if player.current else ""
             # Si ya hay URL resuelta (googlevideo) usamos _proxy(): respeta el
             # Range del cliente (206 + Content-Range) -> el seek funciona y no
-            # se descarga el video completo por cada peticion. _proxy_ytdlp
-            # queda como respaldo cuando aun no hay URL resuelta.
+            # se descarga el video completo por cada peticion.
             if surl:
                 self._proxy(surl)
             else:
-                self._proxy_ytdlp(vid)
+                # Android: sin subprocess no hay respaldo yt-dlp; error claro.
+                self._send(*err_res("Sin stream resuelto", 404))
         else:
             self._send(*err_res("No stream", 404))
 
@@ -554,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
                 vid = data.get("video_id", "")
                 if not vid: self._send(*err_res("video_id required")); return
                 if player.play(vid):
-                    self._send(*json_res({"ok": True, "mp3": os.environ.get("PLAYME_NO_CONVERT") != "1", **player.get_state()}))
+                    self._send(*json_res({"ok": True, **player.get_state()}))
                 else:
                     self._send(*err_res(player.last_error or "Play failed", 500))
             elif path == "/api/convert":
