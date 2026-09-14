@@ -44,6 +44,7 @@ def start(data_dir):
         os.environ["PLAYME_STATIC"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
         os.environ["PLAYME_YTDLP_INPROC"] = "1"
         os.environ["PLAYME_NO_FIREFOX"] = "1"
+        os.environ["PLAYME_COOKIE_FALLBACK"] = "1"
         os.environ["PLAYME_NO_BG_DOWNLOAD"] = "1"
         os.environ["PLAYME_NO_CONVERT"] = "1"
 

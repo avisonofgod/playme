@@ -33,8 +33,29 @@ class Resolver:
 
     def _run(self, args, timeout=None, check=False):
         """Ejecuta un comando via runner. Retorna CompletedProcess con .returncode,
-        .stdout, .stderr. Lanza si runner lo permite y check=True."""
-        return self._runner(args, timeout=timeout, check=check, capture_output=True)
+        .stdout, .stderr. Lanza si runner lo permite y check=True.
+
+        En Android (PLAYME_COOKIE_FALLBACK=1): si la cookie esta rotada/invalida
+        yt-dlp se cuelga o falla; se reintenta SIN --cookies (contenido publico).
+        """
+        res = self._runner(args, timeout=timeout, check=False, capture_output=True)
+        if os.environ.get("PLAYME_COOKIE_FALLBACK") == "1" and getattr(res, "returncode", 0):
+            e = getattr(res, "stderr", b"") or b""
+            if isinstance(e, bytes):
+                e = e.decode("utf-8", "replace")
+            if ("no longer valid" in e or "rotated" in e) and "--cookies" in args:
+                clean, skip = [], False
+                for a in args:
+                    if skip:
+                        skip = False; continue
+                    if a == "--cookies":
+                        skip = True; continue
+                    clean.append(a)
+                logger.warning("cookies: rotadas -> reintento sin --cookies")
+                res = self._runner(clean, timeout=timeout, check=False, capture_output=True)
+        if check and getattr(res, "returncode", 0):
+            raise RuntimeError(self._err_tail(getattr(res, "stderr", b"")) or "yt-dlp fallo")
+        return res
 
     def _sync_cookies(self):
         """Copia cookies viva a temp para que yt-dlp no sobrescriba el original.
