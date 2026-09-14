@@ -220,7 +220,9 @@ def sanitize_filename(title, video_id):
     fname = (title or "").strip()
     if not fname:
         fname = video_id
+    fname = re.sub(r"\.(mp3|webm|m4a|opus|ogg)$", "", fname, flags=re.I)
     fname = fname[:30].replace("/", "-").replace(" ", "-")
+    fname = re.sub(r"-{2,}", "-", fname).strip("-")
     fname = "".join(c for c in fname if c.isalnum() or c in "._- ") or video_id
     fname = fname.strip().replace(" ", "-")
     # quitar comillas, punto-coma y backslash que romperian el header

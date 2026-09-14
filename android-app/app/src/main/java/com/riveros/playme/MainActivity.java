@@ -152,6 +152,15 @@ public class MainActivity extends Activity {
     }
 
     void arrancar() {
+        // Primer plano: sin esto, con la pantalla apagada el sistema (MagicOS/Doze)
+        // corta la red del proceso y fallan busquedas y descargas.
+        try {
+            Intent si = new Intent(this, PlaymeService.class);
+            if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(si);
+            else startService(si);
+        } catch (Throwable e) {
+            Log.w(TAG, "servicio en primer plano no arrancado", e);
+        }
         status.setText("Iniciando PlayMe local...");
         new Thread(() -> {
             try {
