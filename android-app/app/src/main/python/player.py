@@ -42,19 +42,33 @@ class Player:
         if not info:
             info = {"id": video_id, "title": f"YouTube {video_id}", "duration": 0, "uploader": ""}
         cache_p = self.tr.path(video_id)
+        # En Android conviene el modo "file": YouTube sirve muchos audios por SABR
+        # (sin URL directa --get-url) y la descarga siempre funciona; ademas deja
+        # el audio en cache (offline). Se salta el sondeo de estrategias de URL.
+        if not self.tr.is_cached(video_id) and os.environ.get("PLAYME_PREFER_FILE") == "1":
+            logger.info("modo file: descargando audio de %s" % video_id)
+            self.tr.download_bg(video_id, self.res)
         if self.tr.is_cached(video_id):
             mode = "file"
             surl = None
         else:
             surl = self.res.get_stream_url(video_id)
             if not surl:
-                self.last_error = self.res.last_error or f"no stream for {video_id}"
-                logger.error(f"no stream for {video_id}: {self.last_error}")
-                return False
-            mode = "proxy"
-            if os.environ.get("PLAYME_NO_BG_DOWNLOAD") != "1":
-                t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
-                t.start()
+                # YouTube sirve muchos audios por SABR (sin URL directa a googlevideo):
+                # se descarga el audio al cache y se reproduce en modo "file".
+                logger.warning("sin URL directa (%s); se descarga el audio" % (self.res.last_error or "?"))
+                self.tr.download_bg(video_id, self.res)
+                if not self.tr.is_cached(video_id):
+                    self.last_error = self.res.last_error or f"no stream for {video_id}"
+                    logger.error(f"no stream for {video_id}: {self.last_error}")
+                    return False
+                mode = "file"
+                surl = None
+            else:
+                mode = "proxy"
+                if os.environ.get("PLAYME_NO_BG_DOWNLOAD") != "1":
+                    t = threading.Thread(target=self.tr.download_bg, args=(video_id, self.res), daemon=True)
+                    t.start()
         track = {
             "id": video_id,
             "title": info.get("title", f"YouTube {video_id}"),

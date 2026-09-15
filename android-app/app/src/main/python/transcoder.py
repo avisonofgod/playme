@@ -38,7 +38,9 @@ class Transcoder:
         url = f"https://www.youtube.com/watch?v={vid}"
         part = self._part(vid)
         args = resolver._args() + [
-            "--format", "bestaudio[ext=webm]/bestaudio",
+            # Clientes que no exigen PO token/JS runtime y aceptan formatos sin pot
+            "--extractor-args", "youtube:player_client=android_vr,web_embedded,tv;formats=missing_pot",
+            "--format", "bestaudio[ext=webm]/bestaudio/best",
             "--output", part,
             "--no-part", "--no-mtime", url
         ]

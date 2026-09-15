@@ -72,8 +72,12 @@ R=$(curl -s -m 120 -X POST "http://127.0.0.1:$PORT/api/search" -H 'Content-Type:
 echo "$R" | grep -q '"title"' && chk "busqueda 'lofi girl' devuelve resultados" 1 || bad "busqueda 'lofi girl' devuelve resultados"
 
 curl -s -m 60 -X POST "http://127.0.0.1:$PORT/api/play" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ"}' >/dev/null
-sleep 25
-S=$(curl -s -m 15 "http://127.0.0.1:$PORT/api/state")
+# en Android el play descarga el audio (SABR): puede tardar; se espera hasta 180s
+for i in $(seq 1 30); do
+  sleep 6
+  S=$(curl -s -m 15 "http://127.0.0.1:$PORT/api/state")
+  echo "$S" | grep -q '"playing": true' && break
+done
 echo "$S" | grep -q '"playing": true' && chk "play activo" 1 || bad "play activo"
 C=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -r 0-65535 "http://127.0.0.1:$PORT/api/stream")
 [ "$C" = "206" ] && chk "stream HTTP 206" 1 || bad "stream HTTP 206 (got $C)"

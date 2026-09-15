@@ -29,6 +29,7 @@ class Resolver:
         self.last_error = None  # causa real del ultimo fallo (para exponerla en /api/play)
         self._cookie_lock = threading.Lock()  # protege _sync_cookies de acceso concurrente
         self._runner = runner or run_command  # inyectable para tests
+        self._cookies_bad = False  # True tras detectar cookie rotada (Android)
         self._sync_cookies()  # copia inicial
 
     def _run(self, args, timeout=None, check=False):
@@ -36,14 +37,25 @@ class Resolver:
         .stdout, .stderr. Lanza si runner lo permite y check=True.
 
         En Android (PLAYME_COOKIE_FALLBACK=1): si la cookie esta rotada/invalida
-        yt-dlp se cuelga o falla; se reintenta SIN --cookies (contenido publico).
+        yt-dlp se cuelga o falla; se recuerda y se sigue SIN cookies (contenido publico).
         """
+        if os.environ.get("PLAYME_COOKIE_FALLBACK") == "1" and self._cookies_bad and "--cookies" in args:
+            clean, skip = [], False
+            for a in args:
+                if skip:
+                    skip = False; continue
+                if a == "--cookies":
+                    skip = True; continue
+                clean.append(a)
+            args = clean
         res = self._runner(args, timeout=timeout, check=False, capture_output=True)
         if os.environ.get("PLAYME_COOKIE_FALLBACK") == "1" and getattr(res, "returncode", 0):
             e = getattr(res, "stderr", b"") or b""
             if isinstance(e, bytes):
                 e = e.decode("utf-8", "replace")
-            if ("no longer valid" in e or "rotated" in e) and "--cookies" in args:
+            if any(k in e.lower() for k in ("no longer valid", "rotated", "page needs to be reloaded",
+                                             "sign in to confirm", "requested format is not available")) and "--cookies" in args:
+                self._cookies_bad = True
                 clean, skip = [], False
                 for a in args:
                     if skip:
@@ -51,7 +63,7 @@ class Resolver:
                     if a == "--cookies":
                         skip = True; continue
                     clean.append(a)
-                logger.warning("cookies: rotadas -> reintento sin --cookies")
+                logger.warning("cookies: rotadas -> se sigue sin --cookies")
                 res = self._runner(clean, timeout=timeout, check=False, capture_output=True)
         if check and getattr(res, "returncode", 0):
             raise RuntimeError(self._err_tail(getattr(res, "stderr", b"")) or "yt-dlp fallo")
@@ -101,7 +113,7 @@ class Resolver:
     def _args(self, extra=None):
         self._sync_cookies()  # asegura copia fresca antes de cada comando
         a = list(self.ytdlp_cmd)
-        if self._cookies_valid() and os.path.getsize(COOKIES_TEMP) > 0:
+        if self._cookies_valid() and not self._cookies_bad and os.path.getsize(COOKIES_TEMP) > 0:
             a += ["--cookies", COOKIES_TEMP]
         else:
             logger.warning("cookies: archivo no valido, se omite --cookies")
@@ -168,12 +180,12 @@ class Resolver:
         y si falla, degrada a flat."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
-            r = self._run(self._args(["-J", "--format", "bestaudio/best", url]), timeout=8, check=True)
+            r = self._run(self._args(["-J", "--format", "bestaudio/best", url]), timeout=20, check=True)
             return json.loads(r.stdout)
         except Exception:
             pass
         try:
-            r = self._run(self._args(["--flat-playlist", "-J", url]), timeout=6, check=True)
+            r = self._run(self._args(["--flat-playlist", "-J", url]), timeout=15, check=True)
             return json.loads(r.stdout)
         except Exception:
             return None
@@ -183,11 +195,14 @@ class Resolver:
         url = f"https://www.youtube.com/watch?v={video_id}"
         self.last_error = None
         strategies = [
+            {"f": "bestaudio*/best", "e": "youtube:player_client=android_vr;formats=missing_pot"},
             {"f": "251/bestaudio/best", "e": None},
             {"f": "251/bestaudio/best", "e": "youtube:player_client=tv"},
             {"f": "251/bestaudio/best", "e": "youtube:player_client=web_embedded"},
             {"f": "bestaudio/best", "e": "youtube:player_client=mweb"},
             {"f": "bestaudio/best", "e": "youtube:player_client=ios"},
+            {"f": "bestaudio*/best", "e": None},
+            {"f": "best", "e": None},
         ]
         for s in strategies:
             try:
@@ -195,7 +210,7 @@ class Resolver:
                 if s["e"]:
                     args += ["--extractor-args", s["e"]]
                 args.append(url)
-                r = self._run(args, timeout=10)
+                r = self._run(args, timeout=25)
                 if r.returncode == 0:
                     out = (r.stdout or b"").decode(errors="replace").strip()
                     if out:
