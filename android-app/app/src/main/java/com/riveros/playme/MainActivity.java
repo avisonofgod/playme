@@ -5,6 +5,7 @@ import android.app.DownloadManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
 import android.view.View;
@@ -93,6 +94,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onReceivedError(WebView v, WebResourceRequest r, android.webkit.WebResourceError e) {
+                // Solo el frame principal: los subrecursos (thumbnails, red movil)
+                // no deben recargar la UI ni perder la busqueda/cola en pantalla.
+                if (!r.isForMainFrame()) return;
                 if (!loginMode && retries < 20) {
                     retries++;
                     v.postDelayed(() -> v.loadUrl(localUrl()), 1000);
@@ -127,6 +131,15 @@ public class MainActivity extends Activity {
         });
 
         status.setText("Iniciando PlayMe local...");
+
+        // Android 13+: el permiso de notificaciones se pide DESPUES de arrancar
+        // (pedirlo dentro de onCreate dejaba la app sin arrancar en MagicOS)
+        web.postDelayed(() -> {
+            if (Build.VERSION.SDK_INT >= 33) {
+                try { requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 9); } catch (Throwable ignored) {}
+            }
+        }, 8000);
+
         arrancar();
     }
 
@@ -166,7 +179,8 @@ public class MainActivity extends Activity {
             try {
                 if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
                 Object r = Python.getInstance().getModule("playme_boot")
-                        .callAttr("start", getFilesDir().getAbsolutePath()).toJava(Object.class);
+                        .callAttr("start", getFilesDir().getAbsolutePath(),
+                                  getCacheDir().getAbsolutePath()).toJava(Object.class);
                 boolean ok = String.valueOf(r).equalsIgnoreCase("true");
                 runOnUiThread(() -> {
                     if (ok) {
@@ -264,5 +278,28 @@ public class MainActivity extends Activity {
         } else {
             super.onBackPressed();
         }
+    }
+
+    // Ciclo de vida del WebView: sin esto el poll de 2 s sigue en segundo plano
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (web != null) web.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) web.onResume();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (web != null) {
+            web.loadUrl("about:blank");
+            web.destroy();
+            web = null;
+        }
+        super.onDestroy();
     }
 }

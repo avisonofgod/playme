@@ -6,7 +6,10 @@ Este modulo instala un wrapper que cae a java.net.InetAddress cuando el resolver
 nativo falla.
 """
 
+import logging
 import socket
+
+_log = logging.getLogger("dns_java")
 
 _orig_getaddrinfo = socket.getaddrinfo
 _installed = False
@@ -38,10 +41,10 @@ def _getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         _last_error = str(e)
         try:
             res = _resolve_java(host, port, type, proto)
-            print("DNSJAVA: resuelto %s via Java (%d direcciones)" % (host, len(res)))
+            _log.info("resuelto %s via Java (%d direcciones)", host, len(res))
             return res
         except Exception as e2:
-            print("DNSJAVA: fallo tambien via Java: %s" % e2)
+            _log.warning("fallo tambien via Java: %s", e2)
             raise e
 
 
@@ -52,11 +55,11 @@ def install():
     try:
         from java.net import InetAddress  # noqa: F401
     except Exception as e:
-        print("DNSJAVA: no disponible (%s)" % e)
+        _log.warning("no disponible (%s)", e)
         return False
     socket.getaddrinfo = _getaddrinfo
     _installed = True
-    print("DNSJAVA: wrapper instalado")
+    _log.info("wrapper instalado")
     return True
 
 
@@ -80,5 +83,5 @@ def diag(host="www.youtube.com", port=443):
     except Exception as e:
         lines.append("https FAIL %s: %s" % (type(e).__name__, e))
     txt = " | ".join(lines)
-    print("NETDIAG: " + txt)
+    _log.info("NETDIAG: %s", txt)
     return txt

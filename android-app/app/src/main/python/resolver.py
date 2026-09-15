@@ -53,8 +53,7 @@ class Resolver:
             e = getattr(res, "stderr", b"") or b""
             if isinstance(e, bytes):
                 e = e.decode("utf-8", "replace")
-            if any(k in e.lower() for k in ("no longer valid", "rotated", "page needs to be reloaded",
-                                             "sign in to confirm", "requested format is not available")) and "--cookies" in args:
+            if any(k in e.lower() for k in ("no longer valid", "rotated", "sign in to confirm")) and "--cookies" in args:
                 self._cookies_bad = True
                 clean, skip = [], False
                 for a in args:
@@ -180,7 +179,9 @@ class Resolver:
         y si falla, degrada a flat."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
-            r = self._run(self._args(["-J", "--format", "bestaudio/best", url]), timeout=20, check=True)
+            r = self._run(self._args(["-J", "--format", "bestaudio/best",
+                                       "--extractor-args", "youtube:player_client=ios",
+                                       url]), timeout=20, check=True)
             return json.loads(r.stdout)
         except Exception:
             pass
@@ -195,13 +196,10 @@ class Resolver:
         url = f"https://www.youtube.com/watch?v={video_id}"
         self.last_error = None
         strategies = [
+            # "ios" es el unico cliente que descarga sin runtime JS (verificado);
+            # android_vr da URL pero 403 al bajar el audio.
+            {"f": "251/bestaudio[ext=webm]/bestaudio/best", "e": "youtube:player_client=ios"},
             {"f": "bestaudio*/best", "e": "youtube:player_client=android_vr;formats=missing_pot"},
-            {"f": "251/bestaudio/best", "e": None},
-            {"f": "251/bestaudio/best", "e": "youtube:player_client=tv"},
-            {"f": "251/bestaudio/best", "e": "youtube:player_client=web_embedded"},
-            {"f": "bestaudio/best", "e": "youtube:player_client=mweb"},
-            {"f": "bestaudio/best", "e": "youtube:player_client=ios"},
-            {"f": "bestaudio*/best", "e": None},
             {"f": "best", "e": None},
         ]
         for s in strategies:
@@ -215,9 +213,11 @@ class Resolver:
                     out = (r.stdout or b"").decode(errors="replace").strip()
                     if out:
                         line = out.splitlines()[-1]
-                        if line.startswith("http"):
+                        # solo vale una URL real de googlevideo (una SABR da 403)
+                        if line.startswith("http") and ("videoplayback" in line or "googlevideo" in line):
                             self.last_error = None
                             return line
+                        self.last_error = "URL no reproducible: %s" % line[:80]
                 err = self._err_tail(r.stderr)
                 if err:
                     self.last_error = err

@@ -14,14 +14,19 @@ _started = False
 _lock = threading.Lock()
 
 
-def start(data_dir):
-    """Arranca el backend local. Devuelve True si el puerto quedo escuchando."""
+def start(data_dir, cache_dir=None):
+    """Arranca el backend local. Devuelve True si el puerto quedo escuchando.
+
+    data_dir: datos de la app (cookies, logs, mp3).
+    cache_dir: cache de Android (getCacheDir()) para el audio; si no se pasa,
+    se usa data_dir/cache (compatibilidad).
+    """
     global _started
     with _lock:
         if _started:
             return True
 
-        cache = os.path.join(data_dir, "cache")
+        cache = cache_dir or os.path.join(data_dir, "cache")
         logs = os.path.join(data_dir, "logs")
         mp3 = os.path.join(data_dir, "mp3")
         for d in (data_dir, cache, logs, mp3):

@@ -11,6 +11,21 @@ from runner import run_command
 logger = logging.getLogger(__name__)
 CACHE = os.environ.get("PLAYME_CACHE_DIR", "/tmp/playme_cache")
 
+
+def _strip_cookies(args):
+    """Copia los args de yt-dlp sin el par --cookies <archivo> (el cliente ios
+    no soporta cookies y yt-dlp lo descarta si se le pasan)."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a == "--cookies":
+            skip = True
+            continue
+        out.append(a)
+    return out
+
 class Transcoder:
     def __init__(self, runner=None):
         self._runner = runner or run_command
@@ -37,20 +52,32 @@ class Transcoder:
             return
         url = f"https://www.youtube.com/watch?v={vid}"
         part = self._part(vid)
-        args = resolver._args() + [
-            # Clientes que no exigen PO token/JS runtime y aceptan formatos sin pot
-            "--extractor-args", "youtube:player_client=android_vr,web_embedded,tv;formats=missing_pot",
-            "--format", "bestaudio[ext=webm]/bestaudio/best",
+        args = resolver._args()
+        base = [
+            "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "--output", part,
             "--no-part", "--no-mtime", url
         ]
+        # Intentos (verificado 2026-09): el cliente "ios" descarga sin runtime JS
+        # ni PO token, pero yt-dlp lo DESCARTA si hay cookies ("does not support
+        # cookies") -> primero sin cookies; android_vr da URL pero 403 al bajar.
+        attempts = []
+        if "youtube:player_client=ios" not in " ".join(args):
+            attempts.append((_strip_cookies(args), "youtube:player_client=ios"))
+            attempts.append((args, "youtube:player_client=android_vr"))
+            attempts.append((_strip_cookies(args), "youtube:player_client=android_vr"))
         try:
-            res = self._runner(args, timeout=120)
-            rc = getattr(res, "returncode", 0)
-            if rc:
-                se = getattr(res, "stderr", b"") or b""
-                if isinstance(se, bytes): se = se.decode("utf-8", "replace")
-                logger.warning("dl rc=%s: %s" % (rc, se.strip()[-400:]))
+            rc = 1
+            for base_args, client in attempts:
+                a2 = base_args + ["--extractor-args", client] + base
+                res = resolver._run(a2, timeout=180)
+                rc = getattr(res, "returncode", 0)
+                if rc:
+                    se = getattr(res, "stderr", b"") or b""
+                    if isinstance(se, bytes): se = se.decode("utf-8", "replace")
+                    logger.warning("dl rc=%s (%s): %s" % (rc, client, se.strip()[-200:]))
+                if os.path.isfile(part) and os.path.getsize(part) > 0:
+                    break
             if os.path.isfile(part) and os.path.getsize(part) > 0:
                 os.rename(part, self.path(vid))
                 logger.info(f"cache ok: {vid} ({self.size(vid)} bytes)")
@@ -65,9 +92,36 @@ class Transcoder:
                     os.unlink(part)
             except: pass
 
-    def cleanup(self, hours=24):
+    def cleanup(self, hours=24, max_bytes=500 * 1024 * 1024):
+        """Borra lo viejo (>hours) y, si el cache pasa de max_bytes, lo mas
+        antiguo primero (LRU). Antes no habia tope: el cache crecia sin fin."""
         now = time.time()
-        for f in os.listdir(CACHE):
+        files = []
+        try:
+            names = os.listdir(CACHE)
+        except OSError:
+            return
+        for f in names:
             p = os.path.join(CACHE, f)
-            if os.path.isfile(p) and (now - os.path.getmtime(p)) / 3600 > hours:
+            if not os.path.isfile(p):
+                continue
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if (now - st.st_mtime) / 3600 > hours:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+                continue
+            files.append((st.st_mtime, st.st_size, p))
+        total = sum(s for _, s, _ in files)
+        for _, s, p in sorted(files):
+            if total <= max_bytes:
+                break
+            try:
                 os.unlink(p)
+                total -= s
+            except OSError:
+                pass

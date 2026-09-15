@@ -18,6 +18,7 @@ class Player:
         self._lock = threading.Lock()
         self._resolving = False  # resolucion async de stream en curso
         self._cancel_resolve = False
+        self._pending_id = None  # pista pedida mientras se resolvia otra
 
     def get_state(self):
         with self._lock:
@@ -29,13 +30,13 @@ class Player:
                 "current_index": self.idx,
                 "queue": list(self.queue),
                 "current": dict(self.current) if self.current else None,
+                "last_error": self.last_error,
             }
-            if self.current and self.current.get("id"):
-                s["cache_bytes"] = self.tr.size(self.current["id"])
-            else:
-                s["cache_bytes"] = 0
-            s["last_error"] = self.last_error
-            return s
+            cur = self.current["id"] if (self.current and self.current.get("id")) else None
+        # el stat va FUERA del lock: /api/state se consulta cada 2 s y no debe
+        # bloquear play/pausa/next/stream
+        s["cache_bytes"] = self.tr.size(cur) if cur else 0
+        return s
 
     def _resolve_and_set(self, video_id):
         info = self.res.get_info(video_id)
@@ -99,9 +100,14 @@ class Player:
         que el stream este listo."""
         with self._lock:
             if self._resolving:
-                return True  # ya resolviendo (mismo video o previo)
+                # si se pide otra cancion mientras resuelve, se recuerda para
+                # reproducirla al terminar (antes se ignoraba en silencio)
+                if video_id != self._pending_id:
+                    self._pending_id = video_id
+                return True
             self._resolving = True
             self._cancel_resolve = False
+            self._pending_id = None
             self.last_error = None
         threading.Thread(target=self._play_async, args=(video_id,), daemon=True).start()
         return True
@@ -117,11 +123,24 @@ class Player:
             self._resolving = False
             if not ok:
                 return
+            if self._pending_id:
+                # el usuario pidio otra cancion mientras resolvia: se reproduce
+                pend = self._pending_id
+                self._pending_id = None
+                self._resolving = True
+                self._cancel_resolve = False
+                threading.Thread(target=self._play_async, args=(pend,), daemon=True).start()
+                return
             track = dict(self.current)
             if not self.queue or self.idx < 0:
                 self.queue = [track]
                 self.idx = 0
             else:
+                # dedupe: al reproducir varias veces el mismo video no hay que
+                # llenar la cola de copias (antes insertaba siempre)
+                keep = [q for i, q in enumerate(self.queue) if q.get("id") != track["id"] or i >= self.idx]
+                self.idx = max(0, min(self.idx, len(keep) - 1))
+                self.queue = keep
                 self.queue.insert(self.idx + 1, track)
                 self.idx += 1
 
@@ -199,13 +218,11 @@ class Player:
                 if index < self.idx:
                     self.idx -= 1
                 elif index == self.idx:
-                    self.idx = -1
-                    self.playing = False
-                    self.paused = False
-                    self.mode = None
-                    self.stream_url = None
-                    self.cache_path = None
+                    # limpieza completa (marca la cancelacion) conservando el resto
+                    rest = list(self.queue)
                     self.current = None
-                    self.last_error = None
+                    self._stop_locked()
+                    self.queue = rest
+                    self.idx = -1
                 return True
         return False

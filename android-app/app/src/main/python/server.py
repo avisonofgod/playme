@@ -2,7 +2,7 @@
 Endpoints: estado, reproduccion, cola, busqueda, conversor mp3, deteccion de IP.
 Arquitectura modular con rate-limiting por IP; streaming en proxy respeta HTTP Range.
 """
-import json, logging, os, re, shutil, subprocess, threading, time, urllib.request
+import json, logging, logging.handlers, os, re, threading, time, urllib.error, urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
 
@@ -11,7 +11,7 @@ from token_manager import TokenManager
 from transcoder import Transcoder
 from player import Player
 from cookie_parser import build_cookie_header
-from runner import run_command, _kill_group as _kill_group_runner
+from runner import run_command
 
 PORT = int(os.environ.get("PORT", "8191"))
 HOST = os.environ.get("PLAYME_HOST", "0.0.0.0")
@@ -20,10 +20,13 @@ log_dir = os.environ.get("PLAYME_LOG_DIR") or os.path.join(os.path.dirname(os.pa
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 os.makedirs(log_dir, exist_ok=True)
 try:
+    _rh = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, "playme.log"), maxBytes=1000000, backupCount=2, encoding="utf-8"
+    )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.FileHandler(os.path.join(log_dir, "playme.log")), logging.StreamHandler()],
+        handlers=[_rh, logging.StreamHandler()],
     )
 except OSError:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -304,6 +307,9 @@ def read_body(handler):
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
+        # el WebView consulta /api/state cada 2 s: no inundar el log con eso
+        if "/api/state" in (fmt % args):
+            return
         logger.info(f"{self.client_address[0]} - {fmt % args}")
 
     def _send(self, status, headers, body):
@@ -351,8 +357,6 @@ class Handler(BaseHTTPRequestHandler):
                 state["conversions"] = {k: {"status": v["status"], "url": v.get("url", "")} for k, v in convs.items()}
                 state["mp3"] = os.environ.get("PLAYME_NO_CONVERT") != "1"
                 self._send(*json_res({"ok": True, **state}))
-            elif path == "/api/ip":
-                self._send(*json_res({"ok": True, "ip": _detect_public_ip()}))
             elif path == "/api/stream":
                 self._handle_stream()
             elif path.startswith("/api/download/audio/"):
@@ -450,7 +454,7 @@ class Handler(BaseHTTPRequestHandler):
             # Range del cliente (206 + Content-Range) -> el seek funciona y no
             # se descarga el video completo por cada peticion.
             if surl:
-                self._proxy(surl)
+                self._proxy(surl, vid)
             else:
                 # Android: sin subprocess no hay respaldo yt-dlp; error claro.
                 self._send(*err_res("Sin stream resuelto", 404))
@@ -491,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(c); left -= len(c)
         except (BrokenPipeError, ConnectionResetError): pass
 
-    def _proxy(self, url):
+    def _proxy(self, url, vid=None):
         """Proxy de streaming. Envia headers de navegador + cookies para que
         googlevideo no rechace con 403. Mantiene Range/CL/Content-Range."""
         range_h = self.headers.get("Range", "")
@@ -531,6 +535,23 @@ class Handler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     break
             resp.close()
+        except urllib.error.HTTPError as e:
+            # googlevideo rechaza la URL resuelta (403/401/410: expiro o exige
+            # un token que --get-url no da). Se cae al modo archivo: se descarga
+            # el audio y se sirve desde el cache local.
+            if vid and e.code in (401, 403, 410):
+                logger.warning("proxy %s en %s; se descarga el audio y se sirve local" % (e.code, vid))
+                try:
+                    transcoder.download_bg(vid, resolver)
+                except Exception as e2:
+                    logger.warning("fallback descarga fallo: %s" % e2)
+                p = transcoder.path(vid)
+                if os.path.isfile(p) and os.path.getsize(p) > 0:
+                    self._serve_file(p)
+                    return
+            logger.error(f"proxy error: {e}")
+            try: self._send(*err_res("Stream error", 502))
+            except: pass
         except Exception as e:
             logger.error(f"proxy error: {e}")
             try: self._send(*err_res("Stream error", 502))

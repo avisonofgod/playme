@@ -236,6 +236,23 @@ Recompilar:
 bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SDK en /opt/android-sdk)
 ```
 
+## App Android autónoma (`android-app/`) — v1.2.0
+
+> Nota yt-dlp 2026-09: YouTube exige a veces un runtime JS (solver EJS) que Android no
+> lleva. En esos casos el cliente `ios` sigue descargando bien (verificado); el resto
+> (web_embedded/mweb/tv) falla con "page needs to be reloaded" y android_vr da 403 al
+> bajar. Por eso la app usa `player_client=ios` para el audio (modo archivo) y cae a
+> modo archivo si el proxy recibe 403.
+
+
+Cambios de la 1.2.0: cliente android_vr/tv_embedded/android + formats=missing_pot
+(los videos que YouTube sirve por SABR ya no fallan), modo "file" preferido en la app
+(descarga y reproduce local), reintento sin cookies si la cookie esta rotada (tambien en
+la descarga), si el proxy recibe 403 cae solo al modo archivo, red con la pantalla apagada
+(foreground service), APK solo arm64/armv7 (20 MB), log con rotacion, cache con tope y
+en getCacheDir(), dedupe de la cola, pausa que no pierde la pista, permiso de
+notificaciones, ciclo de vida del WebView y solo frame principal en onReceivedError.
+
 ## App Android autónoma (`android-app/`)
 
 APK **independiente**: PlayMe corre DENTRO del móvil (Python 3.11 + yt-dlp embebidos con

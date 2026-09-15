@@ -19,9 +19,10 @@ android {
         applicationId = "com.riveros.playme"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
+        versionCode = 2
+        versionName = "1.2.0"
+        // x86_64 solo servia para el emulador: +11 MB en el APK de release
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -60,6 +61,9 @@ android {
 chaquopy {
     defaultConfig {
         version = "3.11"
-        pip { install("yt-dlp") }
+        // pin: una release nueva de yt-dlp no debe cambiar el APK sin tocar el repo
+        pip { install("yt-dlp==2026.8.19") }
+        // nota: pyc { src = false } no existe en Chaquopy 16.1.0 (el APK lleva
+        // los .py en claro; no es un riesgo de seguridad, es tamano)
     }
 }

@@ -353,6 +353,8 @@ function renderDl(convs) {
 
 
 function poll() {
+  // con la app en segundo plano (o pantalla apagada) no hay que consultar
+  if (typeof document !== "undefined" && document.hidden) { setTimeout(poll, 2000); return }
   api("GET","/api/state").then(function(data) {
     if (data && data.ok) {
       if (offline) { offline = false; st("Listo","success") } // recuperado
