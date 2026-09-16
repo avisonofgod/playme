@@ -1,0 +1,44 @@
+# Changelog
+
+Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: SemVer.
+
+## [1.2.0] - 2026-09-15
+
+### Añadido
+- Servicio en primer plano (`PlaymeService`) con `MediaSession`: la app conserva la red con
+  la pantalla apagada (MagicOS/Doze) — verificado en dispositivo.
+- `netdiag.py` + `GET /api/netdiag`: diagnóstico de red/DNS dentro de la app.
+- Modo archivo preferido en Android: descarga el audio y lo reproduce local (`mode=file`).
+- Si el proxy recibe 403, cae automáticamente al modo archivo.
+
+### Corregido
+- El permiso de notificaciones se pide **después** de arrancar: pedirlo en `onCreate` impedía
+  abrir la app en MagicOS.
+- Android 14: el tipo `mediaPlayback` exige una `MediaSession` activa; sin ella
+  `startForeground` mataba el proceso.
+- Audio con el cliente `ios` de yt-dlp (descarga sin runtime JS). `android_vr` da 403 al
+  bajar y `web_embedded`/`mweb`/`tv` fallan con "page needs to be reloaded" sin solver EJS.
+- La descarga reintenta sin cookies cuando corresponde (el cliente `ios` no las soporta).
+- `print()` en `dns_java.py` corrompía el JSON de yt-dlp (búsquedas vacías en algunos móviles).
+- Cola: sin duplicados al reproducir el mismo vídeo; una pista pedida durante la resolución
+  ya no se pierde; borrar la pista en curso conserva el resto.
+- `onReceivedError` solo actúa en el frame principal (antes recargaba la UI por un subrecurso).
+- Log con rotación (1 MB × 2) y sin registrar cada `GET /api/state`; caché en `getCacheDir()`
+  con tope de 500 MB (LRU).
+
+### Cambiado
+- APK solo `arm64-v8a` + `armeabi-v7a` (fuera `x86_64`, +11 MB): ~20 MB.
+- `yt-dlp` fijado a `2026.8.19` para que una release nueva no cambie el APK sin tocar el repo.
+- UI unificada: `frontend/index.html` es la misma que usa la app.
+
+## [1.1.0] - 2026-09-11
+
+- App Android autónoma (Chaquopy 16.1.0 + yt-dlp embebido), servidor en `127.0.0.1:8191`.
+- Cookie de YouTube por login en el WebView; cookie Netscape reparada automáticamente.
+- DNS vía `java.net.InetAddress` (`dns_java.py`), temporales explícitos, descarga de audio
+  original (webm/m4a) con `DownloadManager` (sin ffmpeg no hay mp3).
+
+## [1.0.0] - 2026-09-11
+
+- Primera versión: servidor Linux (búsqueda, cola, streaming, conversión mp3), UI web de
+  tres pestañas y APK cliente (WebView).

@@ -3,6 +3,10 @@
 > Servidor HTTP de streaming de audio desde YouTube.
 > Busca, reproduce, encola y descarga canciones en mp3 via API REST.
 > Frontend web single-page con tabs (Reproducir | Cola | Descargas), polling a `/api/state` y streaming proxy.
+>
+> **App Android autónoma (v1.2.0)**: APK que corre todo dentro del móvil (Python + yt-dlp),
+> sin PC ni servidor — ver [App Android autónoma](#app-android-autónoma-android-app--v120) y
+> [Releases](https://github.com/avisonofgod/playme/releases). Cambios por versión: `CHANGELOG.md`.
 
 ## Estructura del repositorio
 
@@ -312,6 +316,13 @@ logs/                 # playme.log + errors.log
 - [x] Caché en background
 - [x] 52 tests backend en verde
 
+```bash
+# tests del backend (Linux): 52 en verde
+cd backend && python3 -m unittest discover -s . -p 'test_*.py'
+# suite de la app Android (host; añadir --device con el móvil conectado)
+bash android-app/tests/run-tests.sh [--device]
+```
+
 ### Android (app autónoma v1.2.0, HONOR BRP-NX3 / Android 16)
 
 - [x] Arranque en MagicOS (el permiso de notificaciones se pide después de arrancar)
@@ -322,5 +333,7 @@ logs/                 # playme.log + errors.log
 - [x] Descarga real a `/sdcard/Download` (Adele 5.846.859 B, Ana Becoa 5.594.197 B ×2)
 - [x] Red con la pantalla apagada (servicio en primer plano + MediaSession)
 - [x] Suite del repo: 14/14 TODO-OK (host) con el modo archivo y la descarga
+- [x] La suite marca SKIP (no FAIL) cuando el fallo es el límite de YouTube (PO token/SABR),
+      para no confundir un problema externo con un fallo del código
 - [ ] Reproducción/descarga cuando YouTube exige PO token/EJS en la red del móvil
       (límite externo, issue yt-dlp 12482; requiere runtime JS embebido)
