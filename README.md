@@ -252,9 +252,6 @@ bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SD
 > bajar. Por eso la app usa `player_client=ios` para el audio (modo archivo) y cae a
 > modo archivo si el proxy recibe 403.
 
-
-## App Android autónoma (`android-app/`) — v1.2.0
-
 APK **independiente**: PlayMe corre DENTRO del móvil (Python 3.11 + yt-dlp embebidos con
 Chaquopy), escucha en `127.0.0.1:8191` y se muestra en un WebView. No necesita PC ni servidor.
 - `android-app/app/src/main/python/` → backend portado (mismas clases, rutas por variables de entorno).
@@ -262,7 +259,10 @@ Chaquopy), escucha en `127.0.0.1:8191` y se muestra en un WebView. No necesita P
   (en Android no hay binario ni subprocess util).
 - Cookie de YouTube: la app abre el login de YouTube en su WebView y captura SID/HSID
   (`CookieManager`) escribiendo `cookies.txt` en `filesDir`; botón "Guardar cookie de YouTube".
-  Si ya existe cookie válida, arranca directo.
+  Si ya existe cookie válida, arranca directo. Si la cookie caduca, se reintenta sin ella.
+- Audio con el cliente `ios` de yt-dlp (descarga sin runtime JS); si el proxy recibe 403
+  cae al modo archivo. `PlaymeService` (primer plano + MediaSession) mantiene la red con la
+  pantalla apagada.
 - Compilar: `cd android-app && ./gradlew assembleRelease` (JDK 21, Android SDK 35,
   Chaquopy descarga Python; en este PC: `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`,
   `ANDROID_HOME=/opt/android-sdk`, `GRADLE_USER_HOME=/home/.gradle`).
