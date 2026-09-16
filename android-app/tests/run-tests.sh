@@ -10,7 +10,7 @@
 set -u
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 PYDIR="$REPO/android-app/app/src/main/python"
-APK="$REPO/android-app/dist/PlayMe-Local-1.0.apk"
+APK=$(ls -t "$REPO"/android-app/dist/PlayMe-Local-*.apk 2>/dev/null | head -1)
 PORT="${TEST_PORT:-8299}"
 FAIL=0
 ok(){ echo "PASS $1"; }
@@ -25,9 +25,11 @@ if [ -f "$APK" ]; then
   $BT/apksigner verify "$APK" >/dev/null 2>&1 && chk "apk firmado" 1 || chk "apk firmado" 0
   b=$($BT/aapt2 dump badging "$APK" 2>/dev/null)
   [ "$(echo "$b" | grep -c 'package: name=.com.riveros.playme.')" -ge 1 ] && chk "package com.riveros.playme" 1 || chk "package com.riveros.playme" 0
-  for abi in arm64-v8a armeabi-v7a x86_64; do
+  for abi in arm64-v8a armeabi-v7a; do
     [ "$(echo "$b" | grep -c "$abi")" -ge 1 ] && chk "abi $abi" 1 || chk "abi $abi" 0
   done
+  # v1.2.0: x86_64 fuera del release (solo servia para el emulador)
+  [ "$(echo "$b" | grep -c 'x86_64')" -eq 0 ] && chk "sin x86_64 (APK mas pequeno)" 1 || chk "sin x86_64 (APK mas pequeno)" 0
   [ "$($BT/aapt2 dump xmltree --file AndroidManifest.xml "$APK" 2>/dev/null | grep -c 'minSdkVersion.*24')" -ge 1 ] && chk "minSdk 24" 1 || chk "minSdk 24" 0
 else
   bad "apk presente"
@@ -79,7 +81,19 @@ for i in $(seq 1 30); do
   echo "$S" | grep -q '"playing": true' && break
 done
 echo "$S" | grep -q '"playing": true' && chk "play activo" 1 || bad "play activo"
-C=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -r 0-65535 "http://127.0.0.1:$PORT/api/stream")
+# en modo archivo el audio se esta descargando: esperar a que el cache tenga datos
+# (antes se pedia el stream durante la descarga y daba 000)
+for i in $(seq 1 20); do
+  BY=$(curl -s -m 10 "http://127.0.0.1:$PORT/api/state" | grep -o '"cache_bytes": [0-9]*' | head -1 | tr -dc 0-9)
+  [ "${BY:-0}" -gt 100000 ] && break
+  sleep 5
+done
+C=000
+for i in $(seq 1 6); do
+  C=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -r 0-65535 "http://127.0.0.1:$PORT/api/stream")
+  [ "$C" = "206" ] && break
+  sleep 5
+done
 [ "$C" = "206" ] && chk "stream HTTP 206" 1 || bad "stream HTTP 206 (got $C)"
 # descarga de audio original (Android sin ffmpeg)
 curl -s -m 30 -X POST "http://127.0.0.1:$PORT/api/convert" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ","title":"t"}' >/dev/null
@@ -93,9 +107,15 @@ if [ "$CODE" = "200" ] && [ "$SZ" -gt 100000 ]; then chk "descarga audio origina
 
 kill $BOOTPID 2>/dev/null; pkill -f "playme_boot" 2>/dev/null
 
+# 3b) v1.2.0 (sin red: solo codigo)
+grep -q 'player_client=ios' transcoder.py && chk "transcoder usa el cliente ios" 1 || bad "transcoder usa el cliente ios"
+grep -q '_strip_cookies' transcoder.py && chk "descarga sin cookies (ios no las soporta)" 1 || bad "descarga sin cookies"
+grep -q 'cache_dir=None' playme_boot.py && chk "arranque con cache del sistema" 1 || bad "arranque con cache del sistema"
+! grep -q 'print(' dns_java.py && chk "sin print en dns_java (no corrompe el JSON)" 1 || bad "sin print en dns_java"
+
 # 4) Dispositivo (opcional)
 if [ "${1:-}" = "--device" ]; then
-  ADB=${ANDROID_HOME:-/opt/android-sdk}/../android-sdk/platform-tools/adb
+  ADB=${ANDROID_HOME:-/opt/android-sdk}/platform-tools/adb
   [ -x "$ADB" ] || ADB=$(command -v adb || echo "$HOME/android-sdk/platform-tools/adb")
   if timeout 15 "$ADB" shell pidof com.riveros.playme >/dev/null 2>&1; then
     "$ADB" forward tcp:8291 tcp:8191 >/dev/null 2>&1

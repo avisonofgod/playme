@@ -215,7 +215,11 @@ systemctl start playme.service
 # Puerto: 8191 (configurable via PORT env)
 ```
 
-## Android (APK WebView)
+## Android (APK WebView) — cliente ligero (legacy)
+
+> La vía recomendada es la **app autónoma** (sección siguiente). Este APK es un cliente
+> WebView que solo abre la UI del servidor: sigue sirviendo si ya tienes PlayMe en un PC
+> o VPS, pero depende de él.
 
 APK precompilado: **GitHub Releases** → `PlayMe-1.0.apk` (appId `playme.webview`, minSdk 24).
 Firma: `CN=Riveros` (keystore `android/playme-release.keystore`, NO versionado).
@@ -245,15 +249,7 @@ bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SD
 > modo archivo si el proxy recibe 403.
 
 
-Cambios de la 1.2.0: cliente android_vr/tv_embedded/android + formats=missing_pot
-(los videos que YouTube sirve por SABR ya no fallan), modo "file" preferido en la app
-(descarga y reproduce local), reintento sin cookies si la cookie esta rotada (tambien en
-la descarga), si el proxy recibe 403 cae solo al modo archivo, red con la pantalla apagada
-(foreground service), APK solo arm64/armv7 (20 MB), log con rotacion, cache con tope y
-en getCacheDir(), dedupe de la cola, pausa que no pierde la pista, permiso de
-notificaciones, ciclo de vida del WebView y solo frame principal en onReceivedError.
-
-## App Android autónoma (`android-app/`)
+## App Android autónoma (`android-app/`) — v1.2.0
 
 APK **independiente**: PlayMe corre DENTRO del móvil (Python 3.11 + yt-dlp embebidos con
 Chaquopy), escucha en `127.0.0.1:8191` y se muestra en un WebView. No necesita PC ni servidor.
@@ -263,9 +259,11 @@ Chaquopy), escucha en `127.0.0.1:8191` y se muestra en un WebView. No necesita P
 - Cookie de YouTube: la app abre el login de YouTube en su WebView y captura SID/HSID
   (`CookieManager`) escribiendo `cookies.txt` en `filesDir`; botón "Guardar cookie de YouTube".
   Si ya existe cookie válida, arranca directo.
-- Compilar: `cd android-app && ./gradlew assembleRelease` (JDK 17+, Android SDK, Chaquopy descarga Python).
+- Compilar: `cd android-app && ./gradlew assembleRelease` (JDK 21, Android SDK 35,
+  Chaquopy descarga Python; en este PC: `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`,
+  `ANDROID_HOME=/opt/android-sdk`, `GRADLE_USER_HOME=/home/.gradle`).
 - Firmado con el keystore de Riveros (`android/playme-release.keystore`, no versionado).
-- Requisitos: `minSdk 24`, ABIs `arm64-v8a` + `x86_64`.
+- Requisitos: `minSdk 24`, `targetSdk 35`, ABIs `arm64-v8a` + `armeabi-v7a` (APK ~20 MB).
 
 ## Archivos Clave
 
@@ -313,3 +311,16 @@ logs/                 # playme.log + errors.log
 - [x] Concurrencia (buscar mientras reproduce)
 - [x] Caché en background
 - [x] 52 tests backend en verde
+
+### Android (app autónoma v1.2.0, HONOR BRP-NX3 / Android 16)
+
+- [x] Arranque en MagicOS (el permiso de notificaciones se pide después de arrancar)
+- [x] Servidor local 127.0.0.1:8191 en el móvil (acceso desde el PC con `adb forward`)
+- [x] Buscar y reproducir en el dispositivo (modo archivo, `mode=file`, stream 206)
+- [x] Pausa / reanudar en el dispositivo (`paused:true` / `false`)
+- [x] Cola: agregar + `next` cambia de pista
+- [x] Descarga real a `/sdcard/Download` (Adele 5.846.859 B, Ana Becoa 5.594.197 B ×2)
+- [x] Red con la pantalla apagada (servicio en primer plano + MediaSession)
+- [x] Suite del repo: 14/14 TODO-OK (host) con el modo archivo y la descarga
+- [ ] Reproducción/descarga cuando YouTube exige PO token/EJS en la red del móvil
+      (límite externo, issue yt-dlp 12482; requiere runtime JS embebido)

@@ -128,3 +128,15 @@ que `cookies.txt` tenga `SID` y `HSID` (pueden caducar si la sesión expira).
 5. Copiarlo al servidor como `cookies.txt` (y opcional `cookies_master.txt`).
 
 Nada más: el flujo de PlayMe ya está listo.
+
+## 2026-09: PO token y solver EJS (yt-dlp)
+
+YouTube exige a veces un **PO token** que yt-dlp obtiene resolviendo un challenge con un
+runtime JS (EJS: deno/node). Sin ese runtime:
+- los clientes web fallan con `The page needs to be reloaded`;
+- `player_client=android_vr` obtiene URL pero la descarga da **403**.
+
+- En el PC (deno en `~/.deno/bin`) funciona sin tocar nada.
+- En la app Android se usa `player_client=ios`, que descarga sin runtime JS.
+- Si aun así falla en una red concreta, es el experimento SABR de YouTube
+  ([yt-dlp#12482](https://github.com/yt-dlp/yt-dlp/issues/12482)); reintentar más tarde.
