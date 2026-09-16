@@ -218,10 +218,10 @@ python3 -m unittest discover -s . -p 'test_*.py'
 # Ran 52 tests ... OK
 ```
 
-## App Android autonoma (v1.2.0)
+## App Android autonoma (v1.2.1)
 
 APK que corre PlayMe dentro del movil (Python 3.11 + yt-dlp con Chaquopy), sin PC:
-`android-app/dist/PlayMe-Local-1.2.apk` (arm64-v8a + armeabi-v7a, ~20 MB).
+`android-app/dist/PlayMe-Local-1.2.1.apk` (arm64-v8a + armeabi-v7a, ~20 MB).
 Compilar: `cd android-app && ./gradlew assembleRelease` con
 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`, `ANDROID_HOME=/opt/android-sdk`,
 `GRADLE_USER_HOME=/home/.gradle`. Suite: `bash android-app/tests/run-tests.sh [--device]`.

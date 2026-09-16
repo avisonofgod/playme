@@ -2,6 +2,15 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: SemVer.
 
+## [1.2.1] - 2026-09-15
+
+### Corregido
+- **Reproducción/descarga en el móvil**: la app forzaba `player_client=ios`/`android_vr` y
+  nunca probaba el cliente **por defecto** de yt-dlp, que es el que funciona (probado con
+  el mismo yt-dlp y la misma salida a Internet que el PC). Ahora el orden de intentos es:
+  por defecto → por defecto sin cookies → `ios` sin cookies → `android_vr`.
+  Resultado en dispositivo: reproducción `mode=file` con stream 206 y descarga real.
+
 ## [1.2.0] - 2026-09-15
 
 ### Añadido

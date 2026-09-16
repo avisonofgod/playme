@@ -4,7 +4,7 @@
 > Busca, reproduce, encola y descarga canciones en mp3 via API REST.
 > Frontend web single-page con tabs (Reproducir | Cola | Descargas), polling a `/api/state` y streaming proxy.
 >
-> **App Android autónoma (v1.2.0)**: APK que corre todo dentro del móvil (Python + yt-dlp),
+> **App Android autónoma (v1.2.1)**: APK que corre todo dentro del móvil (Python + yt-dlp),
 > sin PC ni servidor — ver [App Android autónoma](#app-android-autónoma-android-app--v120) y
 > [Releases](https://github.com/avisonofgod/playme/releases). Cambios por versión: `CHANGELOG.md`.
 
@@ -244,7 +244,7 @@ Recompilar:
 bash android/build-apk.sh        # aapt2 + javac + d8 + zipalign + apksigner (SDK en /opt/android-sdk)
 ```
 
-## App Android autónoma (`android-app/`) — v1.2.0
+## App Android autónoma (`android-app/`) — v1.2.1
 
 > Nota yt-dlp 2026-09: YouTube exige a veces un runtime JS (solver EJS) que Android no
 > lleva. En esos casos el cliente `ios` sigue descargando bien (verificado); el resto

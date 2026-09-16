@@ -196,11 +196,11 @@ class Resolver:
         url = f"https://www.youtube.com/watch?v={video_id}"
         self.last_error = None
         strategies = [
-            # "ios" es el unico cliente que descarga sin runtime JS (verificado);
-            # android_vr da URL pero 403 al bajar el audio.
+            # El cliente por defecto es el que funciona en el PC con el mismo
+            # yt-dlp y la misma salida a Internet: va primero.
+            {"f": "251/bestaudio[ext=webm]/bestaudio/best", "e": None},
             {"f": "251/bestaudio[ext=webm]/bestaudio/best", "e": "youtube:player_client=ios"},
             {"f": "bestaudio*/best", "e": "youtube:player_client=android_vr;formats=missing_pot"},
-            {"f": "best", "e": None},
         ]
         for s in strategies:
             try:

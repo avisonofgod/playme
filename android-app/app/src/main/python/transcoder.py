@@ -58,10 +58,11 @@ class Transcoder:
             "--output", part,
             "--no-part", "--no-mtime", url
         ]
-        # Intentos (verificado 2026-09): el cliente "ios" descarga sin runtime JS
-        # ni PO token, pero yt-dlp lo DESCARTA si hay cookies ("does not support
-        # cookies") -> primero sin cookies; android_vr da URL pero 403 al bajar.
-        attempts = []
+        # Intentos: el cliente POR DEFECTO es el que funciona en el PC (mismo
+        # yt-dlp y misma salida a Internet). Los demas van de respaldo: "ios"
+        # descarga sin runtime JS pero lo descarta si hay cookies; android_vr
+        # da URL y 403 al bajar. Se comparan midiendo cual deja el archivo.
+        attempts = [(args, None), (_strip_cookies(args), None)]
         if "youtube:player_client=ios" not in " ".join(args):
             attempts.append((_strip_cookies(args), "youtube:player_client=ios"))
             attempts.append((args, "youtube:player_client=android_vr"))
@@ -69,7 +70,7 @@ class Transcoder:
         try:
             rc = 1
             for base_args, client in attempts:
-                a2 = base_args + ["--extractor-args", client] + base
+                a2 = base_args + (["--extractor-args", client] if client else []) + base
                 res = resolver._run(a2, timeout=180)
                 rc = getattr(res, "returncode", 0)
                 if rc:
