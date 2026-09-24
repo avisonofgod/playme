@@ -14,6 +14,11 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: S
   `PLAYME_PARTIAL_MIN_BYTES` (262144), `PLAYME_STREAM_STALE` (90 s).
 - Estado `streaming` en `/api/state`; la UI muestra la insignia `file · en vivo`,
   los MB descargados y usa la duración conocida para la barra de progreso.
+- **Cambiar de tema corta el actual de inmediato**: pedir otro tema (`play`) limpia
+  el estado de reproducción en el acto (`playing=false`, `current=null`) en vez de
+  seguir sonando "encima" mientras se resuelve el nuevo; la UI corta el `<audio>`
+  (`stopAudio`) y el nuevo tema arranca con sus primeros bytes. Repetir el MISMO
+  tema no corta nada. El anterior sigue en la cola (botón ⏮ vuelve a él).
 
 ### Corregido
 - **Botón "Vaciar descargas"**: no hacía nada porque `window.confirm()` en el WebView

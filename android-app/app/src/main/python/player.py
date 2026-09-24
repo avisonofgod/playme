@@ -130,8 +130,20 @@ class Player:
         """Play ASINCRONO: responde inmediato y resuelve el stream en un thread
         (la resolucion de yt-dlp tarda ~20s; esperarla en el handler dejaba la
         UI en 'Cargando...' 20 segundos). El state expone resolving=true hasta
-        que el stream este listo."""
+        que el stream este listo.
+
+        v1.3.0: pedir OTRO tema corta el actual DE INMEDIATO (antes seguia
+        sonando 'encima' mientras se resolvia el nuevo). El nuevo arranca en
+        cuanto tiene sus primeros bytes."""
         with self._lock:
+            cur = self.current.get("id") if self.current else None
+            if cur and cur != video_id:
+                self.playing = False
+                self.paused = False
+                self.mode = None
+                self.stream_url = None
+                self.cache_path = None
+                self.current = None
             if self._resolving:
                 # si se pide otra cancion mientras resuelve, se recuerda para
                 # reproducirla al terminar (antes se ignoraba en silencio)

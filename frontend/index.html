@@ -250,11 +250,18 @@ function debouncedSearch() {
 
 function playV(id) {
   st("Cargando...", "loading")
+  // v1.3.0: pedir otro tema corta el actual YA (el nuevo arranca con sus
+  // primeros bytes, no se solapa con el anterior)
+  stopAudio()
   api("POST", "/api/play", {video_id: id}).then(function(data) {
     if (!data || !data.ok) { st(data && data.error ? data.error : "Error", "error"); return }
     if (data.resolving) { waitResolved(); return }
     state = data; updateUI(); playAudio(); st("Reproduciendo", "success")
   })
+}
+
+function stopAudio() {
+  if (audio) { audio.pause(); audio.removeAttribute("src"); audio.load() }
 }
 
 // El play es asincrono (resolucion de stream en background): poll hasta que
@@ -265,6 +272,8 @@ function waitResolved() {
     api("GET", "/api/state").then(function(data) {
       if (!data || !data.ok) { clearInterval(t); st("Error de conexión", "error"); return }
       if (data.resolving) {
+        // v1.3.0: mientras resuelve, el tema anterior ya debe estar cortado
+        if (data.playing) stopAudio()
         if (++tries > 60) { clearInterval(t); st("Timeout al resolver", "error") }
         return
       }

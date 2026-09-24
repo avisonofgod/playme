@@ -5,6 +5,7 @@ El play es ASINCRONO (resolucion en thread): los tests esperan con
 wait_resolved() hasta que el estado este listo.
 """
 import time
+import threading
 import unittest
 
 from player import Player
@@ -18,11 +19,15 @@ class FakeResolver:
         self.stream_url_result = "https://stream.example/v1"
         self.stream_fail = False
         self.last_error = None
+        # gate: si se define, get_stream_url espera -> resolucion controlable
+        self.gate = None
 
     def get_info(self, video_id):
         return self.info_data.get(video_id, None)
 
     def get_stream_url(self, video_id):
+        if self.gate is not None:
+            self.gate.wait(5)
         if self.stream_fail:
             self.last_error = f"no stream for {video_id}"
             return None
@@ -90,6 +95,35 @@ class PlayerCoreTest(unittest.TestCase):
         self.assertIsNotNone(p.last_error)
         self.assertIsNone(p.mode)
         self.assertFalse(p.playing)
+
+    def test_play_otro_tema_corta_el_actual(self):
+        """v1.3.0: pedir otro tema detiene el actual de inmediato (no se solapa)."""
+        p = make_player()
+        p.play("v1")
+        wait_resolved(p)
+        self.assertTrue(p.playing)
+        self.assertIsNotNone(p.current)
+        # resolucion de v2 retenida: el corte debe verse ANTES de resolver
+        p.res.gate = threading.Event()
+        p.play("v2")
+        self.assertFalse(p.playing)        # cortado YA (antes de resolver)
+        self.assertIsNone(p.current)
+        self.assertIsNone(p.mode)
+        self.assertTrue(p._resolving)
+        p.res.gate.set()
+        self.assertTrue(wait_resolved(p))
+        self.assertTrue(p.playing)
+        self.assertEqual(p.current["id"], "v2")
+        self.assertEqual(p.idx, 1)
+
+    def test_play_mismo_tema_no_corta(self):
+        """Repetir el mismo tema no debe detener la reproduccion en curso."""
+        p = make_player()
+        p.play("v1")
+        wait_resolved(p)
+        p.play("v1")
+        self.assertTrue(p.playing)
+        self.assertIsNotNone(p.current)
 
     def test_next_avanza_cola(self):
         p = make_player()

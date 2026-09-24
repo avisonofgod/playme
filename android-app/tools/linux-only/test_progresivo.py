@@ -165,6 +165,29 @@ chk("al final queda cacheado", server.transcoder.is_cached(VID))
 st = state()
 chk("streaming=false al completar", st.get("streaming") is False, st.get("streaming"))
 
+# 4b) v1.3.0: cambiar de tema CORTA el anterior y el nuevo arranca al ~1%
+VID2 = "progtest02"
+r = post("/api/play", {"video_id": VID2})
+chk("POST de otro tema corta el actual (playing=false)", r.get("playing") is False, r.get("playing"))
+chk("POST de otro tema limpia current/mode", r.get("current") is None and r.get("mode") is None,
+    "%s/%s" % (r.get("current"), r.get("mode")))
+t0 = time.time()
+st2 = state()
+while (st2.get("current") or {}).get("id") != VID2 and time.time() - t0 < 20:
+    time.sleep(0.1)
+    st2 = state()
+dt = time.time() - t0
+cur2 = (st2.get("current") or {}).get("id")
+chk("el nuevo tema arranca antes del 100%% (%.1fs)" % dt, cur2 == VID2 and st2.get("streaming") is True,
+    "%s streaming=%s" % (cur2, st2.get("streaming")))
+chk("arranca con bytes parciales (%s de %s)" % (st2.get("cache_bytes"), TOTAL),
+    0 < st2.get("cache_bytes", 0) < TOTAL, st2.get("cache_bytes"))
+for _ in range(200):
+    if state().get("streaming") is False:
+        break
+    time.sleep(0.2)
+chk("el nuevo tema sigue solo hasta completar", server.transcoder.is_cached(VID2))
+
 # 5) /api/clean/dl (boton "Vaciar descargas")
 post("/api/convert", {"video_id": VID, "title": "Prueba progresiva"})
 c = post("/api/conversions")["conversions"]

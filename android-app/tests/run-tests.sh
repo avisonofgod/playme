@@ -129,11 +129,16 @@ grep -q 'cache_dir=None' playme_boot.py && chk "arranque con cache del sistema" 
 grep -q 'def wait_partial' transcoder.py && chk "transcoder: arranque con los primeros KB" 1 || bad "transcoder: wait_partial"
 grep -q 'def _serve_growing' server.py && chk "server: stream progresivo (sin esperar el 100%)" 1 || bad "server: _serve_growing"
 grep -q 'def is_downloading' transcoder.py && chk "descarga en background no bloqueante" 1 || bad "is_downloading"
+grep -q 'pedir OTRO tema corta el actual' player.py && chk "play de otro tema corta el actual" 1 || bad "corte al cambiar de tema"
+grep -q 'stopAudio' static/index.html && chk "UI: corta el audio al pedir otro tema" 1 || bad "UI stopAudio"
 grep -q 'askConfirm' static/index.html && chk "UI: confirm propio (Vaciar descargas)" 1 || bad "UI: askConfirm"
 ! grep -q 'if (!confirm(' static/index.html && chk "UI: sin window.confirm (WebView)" 1 || bad "UI: sigue usando confirm()"
 grep -q 'WebChromeClient' "$REPO/android-app/app/src/main/java/com/riveros/playme/MainActivity.java" && chk "app: dialogos JS (onJsConfirm) en el WebView" 1 || bad "app: WebChromeClient"
 grep -q 'versionName = "1.3.0"' "$REPO/android-app/app/build.gradle.kts" && chk "version 1.3.0" 1 || bad "version 1.3.0"
-# progresivo + limpieza de Descargas (mock de descarga, sin red)
+# logica del player (sin red) y progresivo + limpieza de Descargas
+( cd "$REPO/android-app/tools/linux-only" && PYTHONPATH="$PYDIR" python3 test_player.py > "$SIM/player.log" 2>&1 ) \
+  && chk "player: cola/corte/progresivo (test_player)" 1 \
+  || { bad "player: cola/corte/progresivo"; tail -8 "$SIM/player.log"; }
 python3 "$REPO/android-app/tools/linux-only/test_progresivo.py" > "$SIM/prog.log" 2>&1 \
   && chk "reproduccion progresiva + clean/dl (test_progresivo)" 1 \
   || { bad "reproduccion progresiva + clean/dl"; tail -12 "$SIM/prog.log"; }
