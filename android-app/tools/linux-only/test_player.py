@@ -38,6 +38,7 @@ class FakeTranscoder:
     def __init__(self):
         self.cached = set()
         self.cancelled = []      # v1.3.0: ids cuya descarga se corto
+        self.forgotten = []      # v1.3.0: ids cuyo cache se borro
 
     def size(self, vid):
         return 0
@@ -54,6 +55,18 @@ class FakeTranscoder:
     def cancel(self, vid):
         self.cancelled.append(vid)
         return True
+
+    def forget(self, vid):
+        # v1.3.0: el tema abandonado se borra del cache
+        self.cached.discard(vid)
+        self.forgotten.append(vid)
+        return 1
+
+    def forget_except(self, keep=None):
+        leftovers = [v for v in list(self.cached) if v != keep]
+        for v in leftovers:
+            self.cached.discard(v)
+        return len(leftovers)
 
 
 def make_player(**kwargs):
@@ -135,6 +148,57 @@ class PlayerCoreTest(unittest.TestCase):
         p.res.gate.set()
         self.assertTrue(wait_resolved(p))
         self.assertEqual(p.current["id"], "v2")
+
+    def test_play_otro_tema_borra_cache_del_anterior(self):
+        """v1.3.0: al cambiar de tema solo queda en cache el ACTUAL."""
+        p = make_player()
+        p.tr.cached.add("v1")
+        p.play("v1")
+        wait_resolved(p)
+        p.play("v2")
+        wait_resolved(p)
+        self.assertIn("v1", p.tr.forgotten)
+        self.assertNotIn("v1", p.tr.cached)
+        self.assertEqual(p.current["id"], "v2")
+
+    def test_next_borra_cache_del_anterior(self):
+        """v1.3.0: next deja el cache del tema abandonado en cero."""
+        p = make_player()
+        p.tr.cached.update({"v1", "v2"})
+        p.play("v1")
+        wait_resolved(p)
+        p.add_queue("v2")
+        self.assertTrue(p.next())
+        wait_resolved(p)
+        self.assertIn("v1", p.tr.forgotten)
+        self.assertNotIn("v1", p.tr.cached)
+        self.assertEqual(p.current["id"], "v2")   # el actual queda como current
+
+    def test_prev_no_reusa_cache_del_anterior(self):
+        """v1.3.0: volver con prev vuelve a descargar (no reusa el audio viejo)."""
+        p = make_player()
+        p.tr.cached.update({"v1", "v2"})
+        p.play("v1")
+        wait_resolved(p)
+        p.add_queue("v2")
+        self.assertTrue(p.next())
+        wait_resolved(p)
+        self.assertTrue(p.prev())
+        wait_resolved(p)
+        self.assertEqual(p.current["id"], "v1")
+        self.assertIn("v2", p.tr.forgotten)      # v2 se abandono -> borrado
+        self.assertNotIn("v2", p.tr.cached)
+        self.assertNotIn("v1", p.tr.cached)      # v1 se borro al irse; se rebaja
+
+    def test_stop_borra_cache_del_actual(self):
+        """v1.3.0: stop no deja el audio del tema detenido en cache."""
+        p = make_player()
+        p.tr.cached.add("v1")
+        p.play("v1")
+        wait_resolved(p)
+        p.stop()
+        self.assertIn("v1", p.tr.forgotten)
+        self.assertNotIn("v1", p.tr.cached)
 
     def test_stop_corta_la_descarga(self):
         """v1.3.0: stop corta la descarga en curso."""

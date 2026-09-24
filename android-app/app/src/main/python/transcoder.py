@@ -137,6 +137,62 @@ class Transcoder:
             logger.info("descarga cancelada por el usuario: %s" % vid)
         return active
 
+    def forget(self, vid):
+        """Descarta el cache de un tema que se ABANDONA (play de otro/next/prev/stop).
+
+        v1.3.0: al cambiar de tema solo debe quedar en cache el tema ACTUAL;
+        el audio del anterior se borra del disco (antes se acumulaba y al
+        volver con prev se reusaba el audio viejo)."""
+        if not vid:
+            return 0
+        self.cancel(vid)
+        removed = 0
+        for p in (self.path(vid), self._part(vid)):
+            try:
+                if os.path.isfile(p):
+                    removed += os.path.getsize(p)
+                    os.unlink(p)
+            except OSError as e:
+                logger.warning("forget %s: %s" % (vid, e))
+        # el worker puede reescribir el .part justo despues del unlink
+        p = self._part(vid)
+        if os.path.isfile(p):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        if removed:
+            logger.info("cache borrado: %s (%d bytes)" % (vid, removed))
+        return removed
+
+    def forget_except(self, keep=None):
+        """Deja en cache SOLO `keep` (el tema actual): borra los audios de otros
+        temas ya descargados. No toca temporales ni descargas explicitas."""
+        keep = keep or ""
+        removed = 0
+        try:
+            names = os.listdir(CACHE)
+        except OSError:
+            return 0
+        for name in names:
+            vid = None
+            if name.endswith(".webm"):
+                vid = name[:-5]
+            elif name.endswith(".webm.part"):
+                vid = name[:-10]
+            if not vid or vid == keep:
+                continue
+            if not (len(vid) == 11 and vid.replace("-", "").replace("_", "").isalnum()):
+                continue
+            p = os.path.join(CACHE, name)
+            try:
+                if os.path.isfile(p):
+                    removed += os.path.getsize(p)
+                    os.unlink(p)
+            except OSError:
+                pass
+        return removed
+
     def is_cancelled(self, vid):
         ev = self._cancel.get(vid)
         return bool(ev is not None and ev.is_set())

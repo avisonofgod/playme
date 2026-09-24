@@ -5,6 +5,12 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: S
 ## [1.3.0] - 2026-09-24
 
 ### Añadido
+- **Solo el tema actual queda en caché**: al abandonar un tema (play de otro, `next`,
+  `prev`, `stop`) su audio se borra del disco con `Transcoder.forget()` (cancela la
+  descarga y elimina `<id>.webm`/`.part`), y `forget_except()` deja en caché
+  únicamente el tema que se está reproduciendo. Antes el audio abandonado se
+  acumulaba y al volver con `prev` se reusaba el archivo viejo (arrancaba ya
+  descargado). Ahora `prev`/`next` descargan el tema destino desde cero.
 - **Reproducción en vivo (stream progresivo)**: el audio empieza a sonar con los
   primeros ~256 KB (~5 s) en vez de esperar al 100% de la descarga. `download_bg()`
   ya no bloquea (arranca en background y es idempotente), `wait_partial()` espera los

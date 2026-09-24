@@ -56,6 +56,20 @@ class Player:
                     _c(prev)
                 except Exception as e:
                     logger.warning("cancel %s: %s" % (prev, e))
+            # v1.3.0: el tema abandonado NO se queda en cache; solo el actual.
+            _f = getattr(self.tr, "forget", None)
+            if _f:
+                try:
+                    _f(prev)
+                except Exception as e:
+                    logger.warning("forget %s: %s" % (prev, e))
+        # cualquier otro audio cacheado de la sesion sobra: solo el actual
+        _fe = getattr(self.tr, "forget_except", None)
+        if _fe:
+            try:
+                _fe(video_id)
+            except Exception as e:
+                logger.warning("forget_except: %s" % e)
         info = self.res.get_info(video_id)
         if not info:
             info = {"id": video_id, "title": f"YouTube {video_id}", "duration": 0, "uploader": ""}
@@ -163,6 +177,13 @@ class Player:
                         _c(cur)
                     except Exception as e:
                         logger.warning("cancel %s: %s" % (cur, e))
+                # v1.3.0: el tema que se abandona no deja audio en cache
+                _f = getattr(self.tr, "forget", None)
+                if _f:
+                    try:
+                        _f(cur)
+                    except Exception as e:
+                        logger.warning("forget %s: %s" % (cur, e))
             if self._resolving:
                 # si se pide otra cancion mientras resuelve, se recuerda para
                 # reproducirla al terminar (antes se ignoraba en silencio)
@@ -217,6 +238,13 @@ class Player:
             if _c:
                 try:
                     _c(cur)
+                except Exception:
+                    pass
+            # v1.3.0: stop tampoco deja el audio en cache (solo el tema actual)
+            _f = getattr(self.tr, "forget", None)
+            if _f:
+                try:
+                    _f(cur)
                 except Exception:
                     pass
         self.playing = False

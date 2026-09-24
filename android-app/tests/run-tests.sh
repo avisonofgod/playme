@@ -130,6 +130,10 @@ grep -q 'def wait_partial' transcoder.py && chk "transcoder: arranque con los pr
 grep -q 'def _serve_growing' server.py && chk "server: stream progresivo (sin esperar el 100%)" 1 || bad "server: _serve_growing"
 grep -q 'def is_downloading' transcoder.py && chk "descarga en background no bloqueante" 1 || bad "is_downloading"
 grep -q 'pedir OTRO tema corta el actual' player.py && chk "play de otro tema corta el actual" 1 || bad "corte al cambiar de tema"
+# v1.3.0: al cambiar de tema solo queda en cache el ACTUAL (el anterior se borra)
+grep -q 'def forget' transcoder.py && chk "transcoder: forget() borra el audio del tema abandonado" 1 || bad "forget() en transcoder"
+grep -q 'def forget_except' transcoder.py && chk "transcoder: forget_except() deja solo el tema actual" 1 || bad "forget_except() en transcoder"
+grep -q '_f(cur)' player.py && chk "player: abandonar un tema borra su cache (play/next/prev/stop)" 1 || bad "forget en player"
 grep -q 'stopAudio' static/index.html && chk "UI: corta el audio al pedir otro tema" 1 || bad "UI stopAudio"
 grep -q 'askConfirm' static/index.html && chk "UI: confirm propio (Vaciar descargas)" 1 || bad "UI: askConfirm"
 ! grep -q 'if (!confirm(' static/index.html && chk "UI: sin window.confirm (WebView)" 1 || bad "UI: sigue usando confirm()"

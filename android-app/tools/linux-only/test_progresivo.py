@@ -237,5 +237,28 @@ r = post("/api/clean/dl")
 c = post("/api/conversions")["conversions"]
 chk("POST /api/clean/dl vacia la lista", r.get("ok") is True and c == {}, c)
 
+# 6) v1.3.0: al cambiar de tema solo queda el cache del ACTUAL
+VID5 = "progtest05"
+server.transcoder.download_bg(VID5, server.player.res)
+for _ in range(200):
+    if server.transcoder.size(VID5) > 0:
+        break
+    time.sleep(0.1)
+antes = server.transcoder.size(VID5)
+chk("VID5 tiene bytes en cache antes de cambiar (%s)" % antes, antes > 0, antes)
+n = server.transcoder.forget(VID5)
+chk("forget(VID5) borra el audio del tema abandonado (%s B)" % n, n > 0, n)
+chk("VID5 ya no esta en cache", not server.transcoder.is_cached(VID5))
+chk("no queda .part de VID5", server.transcoder.available_path(VID5) is None)
+chk("el cache conserva el tema ACTUAL (VID4)",
+    server.transcoder.is_cached(VID4), server.transcoder.size(VID4))
+_extra = os.path.join(os.environ["PLAYME_CACHE_DIR"], "otrovideo01.webm")
+with open(_extra, "wb") as f:
+    f.write(b"\x1a\x45\xdf\xa3" + b"\x00" * 2048)
+borrados = server.transcoder.forget_except(VID4)
+chk("forget_except deja solo el tema actual (%s B borrados)" % borrados, borrados > 0, borrados)
+chk("el otro audio ya no esta en disco", not os.path.isfile(_extra))
+chk("el tema actual sigue intacto tras forget_except", server.transcoder.is_cached(VID4))
+
 print("== resultado: %s ==" % ("TODO-OK" if not FAIL else "%d fallos" % len(FAIL)))
 sys.exit(1 if FAIL else 0)
