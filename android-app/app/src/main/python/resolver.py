@@ -32,10 +32,11 @@ class Resolver:
         self._cookies_bad = False  # True tras detectar cookie rotada (Android)
         self._sync_cookies()  # copia inicial
 
-    def _run(self, args, timeout=None, check=False):
+    def _run(self, args, timeout=None, check=False, **kw):
         """Ejecuta un comando via runner. Retorna CompletedProcess con .returncode,
         .stdout, .stderr. Lanza si runner lo permite y check=True.
 
+        kw se pasa al runner (v1.3.0: cancel=threading.Event para abortar).
         En Android (PLAYME_COOKIE_FALLBACK=1): si la cookie esta rotada/invalida
         yt-dlp se cuelga o falla; se recuerda y se sigue SIN cookies (contenido publico).
         """
@@ -48,7 +49,9 @@ class Resolver:
                     skip = True; continue
                 clean.append(a)
             args = clean
-        res = self._runner(args, timeout=timeout, check=False, capture_output=True)
+        res = self._runner(args, timeout=timeout, check=False, capture_output=True, **kw)
+        if getattr(res, "cancelled", False):
+            return res
         if os.environ.get("PLAYME_COOKIE_FALLBACK") == "1" and getattr(res, "returncode", 0):
             e = getattr(res, "stderr", b"") or b""
             if isinstance(e, bytes):
@@ -63,7 +66,7 @@ class Resolver:
                         skip = True; continue
                     clean.append(a)
                 logger.warning("cookies: rotadas -> se sigue sin --cookies")
-                res = self._runner(clean, timeout=timeout, check=False, capture_output=True)
+                res = self._runner(clean, timeout=timeout, check=False, capture_output=True, **kw)
         if check and getattr(res, "returncode", 0):
             raise RuntimeError(self._err_tail(getattr(res, "stderr", b"")) or "yt-dlp fallo")
         return res

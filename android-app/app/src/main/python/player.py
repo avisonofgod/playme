@@ -45,6 +45,17 @@ class Player:
         return s
 
     def _resolve_and_set(self, video_id):
+        # v1.3.0: el tema anterior (si es otro) se corta del todo, descarga incluida;
+        # asi yt-dlp queda libre y este tema se resuelve/descarga en seguida.
+        with self._lock:
+            prev = self.current.get("id") if self.current else None
+        if prev and prev != video_id:
+            _c = getattr(self.tr, "cancel", None)
+            if _c:
+                try:
+                    _c(prev)
+                except Exception as e:
+                    logger.warning("cancel %s: %s" % (prev, e))
         info = self.res.get_info(video_id)
         if not info:
             info = {"id": video_id, "title": f"YouTube {video_id}", "duration": 0, "uploader": ""}
@@ -62,7 +73,7 @@ class Player:
                 try:
                     waiter(video_id,
                            timeout=float(os.environ.get("PLAYME_PARTIAL_WAIT", "25")),
-                           min_bytes=int(os.environ.get("PLAYME_PARTIAL_MIN_BYTES", "262144")))
+                           min_bytes=int(os.environ.get("PLAYME_PARTIAL_MIN_BYTES", "81920")))
                 except Exception as e:
                     logger.warning("wait_partial %s: %s" % (video_id, e))
         avail = cache_p if self.tr.is_cached(video_id) else None
@@ -144,6 +155,14 @@ class Player:
                 self.stream_url = None
                 self.cache_path = None
                 self.current = None
+                # v1.3.0: cortar tambien su DESCARGA (no solo el audio): libera
+                # yt-dlp para que el tema nuevo se resuelva en seguida.
+                _c = getattr(self.tr, "cancel", None)
+                if _c:
+                    try:
+                        _c(cur)
+                    except Exception as e:
+                        logger.warning("cancel %s: %s" % (cur, e))
             if self._resolving:
                 # si se pide otra cancion mientras resuelve, se recuerda para
                 # reproducirla al terminar (antes se ignoraba en silencio)
@@ -191,6 +210,15 @@ class Player:
 
     def _stop_locked(self):
         """Detiene la reproduccion. DEBE llamarse con self._lock YA tomado."""
+        cur = self.current.get("id") if self.current else None
+        if cur:
+            # v1.3.0: stop corta tambien la descarga en curso
+            _c = getattr(self.tr, "cancel", None)
+            if _c:
+                try:
+                    _c(cur)
+                except Exception:
+                    pass
         self.playing = False
         self.paused = False
         self.mode = None

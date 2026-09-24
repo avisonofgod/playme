@@ -63,22 +63,29 @@ class Res:
     def _args(self):
         return []
 
-    def _run(self, args, timeout=None):
+    def _run(self, args, timeout=None, cancel=None):
         out = args[args.index("--output") + 1]
         with open(out, "wb") as f:
             f.write(HEAD)
             f.flush()
             left = TOTAL - len(HEAD)
             while left > 0:
+                if cancel is not None and cancel.is_set():
+                    break                      # simula el aborto de yt-dlp
                 n = min(CHUNK, left)
                 f.write(b"a" * n)
                 f.flush()
                 left -= n
                 time.sleep(CHUNK_DELAY)
+
         class R:
             returncode = 0
             stdout = b""
             stderr = b""
+            cancelled = False
+        R.cancelled = bool(cancel is not None and cancel.is_set())
+        if R.cancelled:
+            R.returncode = 1
         return R()
 
 
@@ -187,6 +194,40 @@ for _ in range(200):
         break
     time.sleep(0.2)
 chk("el nuevo tema sigue solo hasta completar", server.transcoder.is_cached(VID2))
+
+# 4c) v1.3.0: cambiar de tema CORTA tambien la DESCARGA anterior (libera yt-dlp
+#     para que el nuevo arranque ya, no cuando termine la descarga vieja)
+VID3 = "progtest03"
+VID4 = "progtest04"
+post("/api/play", {"video_id": VID3})
+t0 = time.time()
+while time.time() - t0 < 10:
+    if server.transcoder.is_downloading(VID3) and server.transcoder.size(VID3) > 0:
+        break
+    time.sleep(0.1)
+chk("VID3 descargando en curso", server.transcoder.is_downloading(VID3), server.transcoder.size(VID3))
+t0 = time.time()
+post("/api/play", {"video_id": VID4})
+while server.transcoder.is_downloading(VID3) and time.time() - t0 < 5:
+    time.sleep(0.05)
+dt = time.time() - t0
+chk("play de otro tema corta la descarga anterior (%.2fs)" % dt,
+    not server.transcoder.is_downloading(VID3), dt)
+chk("no queda .part a medias del tema cortado", server.transcoder.available_path(VID3) is None,
+    server.transcoder.available_path(VID3))
+t0 = time.time()
+st4 = state()
+while (st4.get("current") or {}).get("id") != VID4 and time.time() - t0 < 20:
+    time.sleep(0.1)
+    st4 = state()
+chk("el tema nuevo arranca con ~5 s de audio (%s B)" % st4.get("cache_bytes"),
+    (st4.get("current") or {}).get("id") == VID4 and st4.get("streaming") is True
+    and 0 < st4.get("cache_bytes", 0) < TOTAL, st4.get("cache_bytes"))
+for _ in range(200):
+    if state().get("streaming") is False:
+        break
+    time.sleep(0.2)
+chk("el tema nuevo sigue solo hasta completar", server.transcoder.is_cached(VID4))
 
 # 5) /api/clean/dl (boton "Vaciar descargas")
 post("/api/convert", {"video_id": VID, "title": "Prueba progresiva"})

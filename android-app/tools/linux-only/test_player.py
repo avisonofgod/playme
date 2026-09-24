@@ -37,6 +37,7 @@ class FakeResolver:
 class FakeTranscoder:
     def __init__(self):
         self.cached = set()
+        self.cancelled = []      # v1.3.0: ids cuya descarga se corto
 
     def size(self, vid):
         return 0
@@ -49,6 +50,10 @@ class FakeTranscoder:
 
     def download_bg(self, vid, resolver):
         pass
+
+    def cancel(self, vid):
+        self.cancelled.append(vid)
+        return True
 
 
 def make_player(**kwargs):
@@ -115,6 +120,30 @@ class PlayerCoreTest(unittest.TestCase):
         self.assertTrue(p.playing)
         self.assertEqual(p.current["id"], "v2")
         self.assertEqual(p.idx, 1)
+        # y tambien se corta su DESCARGA (libera yt-dlp para el tema nuevo)
+        self.assertIn("v1", p.tr.cancelled)
+
+    def test_next_corta_la_descarga_anterior(self):
+        """v1.3.0: next tambien corta la descarga del tema que deja atras."""
+        p = make_player()
+        p.play("v1")
+        wait_resolved(p)
+        p.add_queue("v2")
+        p.res.gate = threading.Event()
+        self.assertTrue(p.next())          # arranca resolucion de v2 (retenida)
+        self.assertIn("v1", p.tr.cancelled)
+        p.res.gate.set()
+        self.assertTrue(wait_resolved(p))
+        self.assertEqual(p.current["id"], "v2")
+
+    def test_stop_corta_la_descarga(self):
+        """v1.3.0: stop corta la descarga en curso."""
+        p = make_player()
+        p.play("v1")
+        wait_resolved(p)
+        p.stop()
+        self.assertIn("v1", p.tr.cancelled)
+        self.assertIsNone(p.current)
 
     def test_play_mismo_tema_no_corta(self):
         """Repetir el mismo tema no debe detener la reproduccion en curso."""

@@ -31,6 +31,7 @@ class Transcoder:
         self._runner = runner or run_command
         os.makedirs(CACHE, exist_ok=True)
         self._active = {}          # vid -> True mientras la descarga esta en curso
+        self._cancel = {}          # vid -> threading.Event de la descarga en curso
         self._active_lock = threading.Lock()
 
     def path(self, vid):
@@ -73,11 +74,11 @@ class Transcoder:
                     return n
         return 0
 
-    def wait_partial(self, vid, timeout=25.0, min_bytes=262144):
+    def wait_partial(self, vid, timeout=25.0, min_bytes=81920):
         """Espera los PRIMEROS bytes del audio (o el final de la descarga).
 
-        v1.3.0: el play ya no espera al 100%; con ~256 KB (unos segundos de
-        audio) el <audio> puede empezar y el resto llega mientras suena."""
+        v1.3.0: el play ya no espera al 100%; con ~80 KB (unos 5 s de audio) el
+        <audio> puede empezar y el resto llega mientras suena."""
         end = time.time() + max(0.0, timeout)
         while True:
             p = self.available_path(vid)
@@ -118,7 +119,35 @@ class Transcoder:
             if self._active.get(vid):
                 return
             self._active[vid] = True
+            self._cancel[vid] = threading.Event()
         threading.Thread(target=self._download_worker, args=(vid, resolver), daemon=True).start()
+
+    def cancel(self, vid):
+        """Aborta la descarga en curso de `vid` (el usuario cambio de tema o stop).
+
+        v1.3.0: al cortarse el tema tambien se corta su descarga; ademas libera el
+        yt-dlp (una sola instancia) para que el tema NUEVO pueda resolverse en
+        seguida en vez de esperar a que termine la descarga anterior."""
+        with self._active_lock:
+            ev = self._cancel.get(vid)
+            active = bool(self._active.get(vid))
+            if ev is not None:
+                ev.set()
+        if active:
+            logger.info("descarga cancelada por el usuario: %s" % vid)
+        return active
+
+    def is_cancelled(self, vid):
+        ev = self._cancel.get(vid)
+        return bool(ev is not None and ev.is_set())
+
+    def _cancel_event(self, vid):
+        with self._active_lock:
+            ev = self._cancel.get(vid)
+            if ev is None:
+                ev = threading.Event()
+                self._cancel[vid] = ev
+            return ev
 
     def _download_worker(self, vid, resolver):
         try:
@@ -126,19 +155,20 @@ class Transcoder:
         finally:
             with self._active_lock:
                 self._active.pop(vid, None)
+                self._cancel.pop(vid, None)
 
     def _download_sync(self, vid, resolver):
         """Descarga a .part y renombra a final al completar.
         Asi, un archivo parcial (descarga abortada) NO se marca como cached."""
         if self.is_cached(vid):
             return
-        url = f"https://www.youtube.com/watch?v={vid}"
+        ev = self._cancel_event(vid)
         part = self._part(vid)
         args = resolver._args()
         base = [
             "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
             "--output", part,
-            "--no-part", "--no-mtime", url
+            "--no-part", "--no-mtime", f"https://www.youtube.com/watch?v={vid}"
         ]
         # Intentos: el cliente POR DEFECTO es el que funciona en el PC (mismo
         # yt-dlp y misma salida a Internet). Los demas van de respaldo: "ios"
@@ -149,25 +179,39 @@ class Transcoder:
             attempts.append((_strip_cookies(args), "youtube:player_client=ios"))
             attempts.append((args, "youtube:player_client=android_vr"))
             attempts.append((_strip_cookies(args), "youtube:player_client=android_vr"))
+        cancelled = False
         try:
             rc = 1
             for base_args, client in attempts:
+                if ev.is_set():          # v1.3.0: el usuario corto este tema
+                    cancelled = True
+                    break
                 a2 = base_args + (["--extractor-args", client] if client else []) + base
-                res = resolver._run(a2, timeout=180)
+                res = resolver._run(a2, timeout=180, cancel=ev)
                 rc = getattr(res, "returncode", 0)
+                if getattr(res, "cancelled", False) or ev.is_set():
+                    cancelled = True
+                    break
                 if rc:
                     se = getattr(res, "stderr", b"") or b""
                     if isinstance(se, bytes): se = se.decode("utf-8", "replace")
                     logger.warning("dl rc=%s (%s): %s" % (rc, client, se.strip()[-200:]))
                 if os.path.isfile(part) and os.path.getsize(part) > 0:
                     break
-            if os.path.isfile(part) and os.path.getsize(part) > 0:
+            if cancelled:
+                logger.info("descarga cortada: %s" % vid)
+            elif os.path.isfile(part) and os.path.getsize(part) > 0:
                 os.rename(part, self.path(vid))
                 logger.info(f"cache ok: {vid} ({self.size(vid)} bytes)")
+                return
             else:
                 logger.warning(f"cache empty: {vid}")
-                if os.path.isfile(part):
+            # cancelada o vacia: no dejar .part a medias en el cache
+            if os.path.isfile(part):
+                try:
                     os.unlink(part)
+                except OSError:
+                    pass
         except Exception as e:
             logger.warning(f"cache fail {vid}: {e}")
             try:

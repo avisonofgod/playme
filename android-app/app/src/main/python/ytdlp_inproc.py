@@ -8,12 +8,16 @@ Correctitud:
 - Un solo yt-dlp a la vez (no es reentrante), pero con TIMEOUT efectivo: si se
   cuelga (red movil), el lock se libera y la API deja de bloquearse.
 - La salida se captura igual que un CompletedProcess.
+- v1.3.0: `cancel=` (threading.Event) aborta la descarga en curso. Se usa la API
+  de yt-dlp (parse_options + YoutubeDL) con un progress hook que lanza
+  DownloadCancelled; sin `cancel` se sigue usando yt_dlp.main() tal cual.
 """
 import contextlib
 import io
 import logging
 import os
 import threading
+import time
 
 logger = logging.getLogger("ytdlp_inproc")
 
@@ -22,10 +26,11 @@ DEFAULT_TIMEOUT = 300     # segundos; sin timeout, un cuelgue bloquea toda la AP
 
 
 class _Result:
-    def __init__(self, returncode, stdout, stderr):
+    def __init__(self, returncode, stdout, stderr, cancelled=False):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+        self.cancelled = cancelled
 
 
 def _strip_prefix(args):
@@ -37,13 +42,43 @@ def _strip_prefix(args):
     return [str(x) for x in a]
 
 
-def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False):
+def _api_download(argv, cancel, err, holder):
+    """Descarga con la API para poder ABORTARLA (progress hook -> DownloadCancelled).
+
+    Devuelve el returncode como yt_dlp.main()."""
+    import yt_dlp
+    from yt_dlp import parse_options, YoutubeDL
+    from yt_dlp.utils import DownloadCancelled, YoutubeDLError
+
+    _parser, _opts, urls, ydl_opts = parse_options(argv)
+    hooks = list(ydl_opts.get("progress_hooks") or [])
+
+    def _ph(_status):
+        if cancel is not None and cancel.is_set():
+            raise DownloadCancelled("cancelado por el usuario")
+
+    hooks.append(_ph)
+    ydl_opts["progress_hooks"] = hooks
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            ret = ydl.download(urls)
+    except DownloadCancelled:
+        holder["cancelled"] = True
+        err.write("[download] cancelado por el usuario\n")
+        return 1
+    except YoutubeDLError as e:
+        err.write("ERROR: %s\n" % e)
+        return 1
+    return int(ret) if ret else 0
+
+
+def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False, cancel=None):
     import yt_dlp
 
     argv = _strip_prefix(args)
     tmo = timeout or DEFAULT_TIMEOUT
     out, err = io.StringIO(), io.StringIO()
-    holder = {"code": None}
+    holder = {"code": None, "cancelled": False}
     released = {"v": False}
 
     def _release():
@@ -57,8 +92,11 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
     def _job():
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                r = yt_dlp.main(argv)
-                holder["code"] = r if isinstance(r, int) else 0
+                if cancel is None:
+                    r = yt_dlp.main(argv)
+                    holder["code"] = r if isinstance(r, int) else 0
+                else:
+                    holder["code"] = _api_download(argv, cancel, err, holder)
         except SystemExit as e:  # yt-dlp sale con sys.exit
             holder["code"] = e.code if isinstance(e.code, int) else 0
         except BaseException as e:  # nunca tumbar el server por un fallo de yt-dlp
@@ -69,14 +107,27 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
 
     # Esperar el lock: si una descarga esta en curso, la reproduccion no debe
     # fallar al instante; se espera hasta PLAYME_LOCK_WAIT (60s por defecto).
+    # Con `cancel` la espera se corta en cuanto el usuario cambia de tema.
     wait = int(os.environ.get("PLAYME_LOCK_WAIT", "60") or 60)
-    if not _LOCK.acquire(timeout=max(tmo, wait)):
+    deadline = time.time() + max(tmo, wait)
+    got = False
+    while time.time() < deadline:
+        if cancel is not None and cancel.is_set():
+            err.write("ERROR: cancelado antes de ejecutar\n")
+            return _Result(1, b"", err.getvalue().encode(), cancelled=True)
+        if _LOCK.acquire(timeout=0.25):
+            got = True
+            break
+    if not got:
         err.write("ERROR: yt-dlp ocupado mas de %ss\n" % max(tmo, wait))
         return _Result(124, b"", err.getvalue().encode())
 
     t = threading.Thread(target=_job, daemon=True)
     t.start()
-    t.join(tmo)
+    # join por tramos: si el hilo aborta por cancel, se sale antes
+    end = time.time() + tmo
+    while t.is_alive() and time.time() < end:
+        t.join(0.25)
     if t.is_alive():
         # Se colgo. NO liberamos el lock: el hilo sigue dentro de yt-dlp y
         # liberar aqui permitiria comandos en paralelo sobre la misma libreria
@@ -94,7 +145,7 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
             stderr.write(se.decode("utf-8", "replace") if not text else se)
         except Exception:
             pass
-    res = _Result(code, so, se)
+    res = _Result(code, so, se, cancelled=bool(holder["cancelled"]))
     if code:
         _e = se.decode("utf-8", "replace") if isinstance(se, bytes) else str(se)
         logger.warning("inproc rc=%s args=%s | %s" % (code, " ".join([str(a) for a in argv[:8]]), _e.strip()[-300:]))
