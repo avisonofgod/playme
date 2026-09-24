@@ -134,6 +134,15 @@ grep -q 'pedir OTRO tema corta el actual' player.py && chk "play de otro tema co
 grep -q 'def forget' transcoder.py && chk "transcoder: forget() borra el audio del tema abandonado" 1 || bad "forget() en transcoder"
 grep -q 'def forget_except' transcoder.py && chk "transcoder: forget_except() deja solo el tema actual" 1 || bad "forget_except() en transcoder"
 grep -q '_f(cur)' player.py && chk "player: abandonar un tema borra su cache (play/next/prev/stop)" 1 || bad "forget en player"
+# v1.3.0: descarga al ritmo de reproduccion (no baja el archivo completo)
+grep -q 'def _pace_for' transcoder.py && chk "transcoder: descarga al ritmo de la reproduccion (pace)" 1 || bad "_pace_for"
+grep -q 'def position' transcoder.py && chk "transcoder: posicion de reproduccion (posicion + 5 s)" 1 || bad "position()"
+grep -q 'def disable_pace' transcoder.py && chk "transcoder: Descargar audio pide descarga completa" 1 || bad "disable_pace"
+grep -q 'api/position' server.py && chk "server: POST /api/position" 1 || bad "/api/position"
+grep -q 'pace=pace' ytdlp_inproc.py && chk "ytdlp in-process: el hook pausa la descarga" 1 || bad "pace en ytdlp_inproc"
+grep -q 'disable_pace' server.py && chk "server: descarga completa al pedir el audio" 1 || bad "disable_pace en server"
+grep -q 'sendPos' static/index.html && chk "UI: reporta la posicion de reproduccion" 1 || bad "UI sendPos"
+grep -q 'function stepT' static/index.html && chk "UI: next/prev recorren la lista de resultados" 1 || bad "UI stepT"
 grep -q 'stopAudio' static/index.html && chk "UI: corta el audio al pedir otro tema" 1 || bad "UI stopAudio"
 grep -q 'askConfirm' static/index.html && chk "UI: confirm propio (Vaciar descargas)" 1 || bad "UI: askConfirm"
 ! grep -q 'if (!confirm(' static/index.html && chk "UI: sin window.confirm (WebView)" 1 || bad "UI: sigue usando confirm()"
@@ -146,6 +155,12 @@ grep -q 'versionName = "1.3.0"' "$REPO/android-app/app/build.gradle.kts" && chk 
 python3 "$REPO/android-app/tools/linux-only/test_progresivo.py" > "$SIM/prog.log" 2>&1 \
   && chk "reproduccion progresiva + clean/dl (test_progresivo)" 1 \
   || { bad "reproduccion progresiva + clean/dl"; tail -12 "$SIM/prog.log"; }
+# UI real sin navegador (jsdom): next/prev de la lista y reporte de posicion
+if command -v node >/dev/null 2>&1; then
+  ( cd "$REPO" && NODE_PATH="${NODE_PATH:-/tmp/jtest/node_modules}" node android-app/tools/linux-only/ui-test.js > "$SIM/ui.log" 2>&1 ) \
+    && chk "UI: next/prev de la lista + posicion (ui-test)" 1 \
+    || { bad "UI: next/prev de la lista + posicion"; tail -8 "$SIM/ui.log"; }
+fi
 
 # 4) Dispositivo (opcional)
 if [ "${1:-}" = "--device" ]; then

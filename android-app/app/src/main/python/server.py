@@ -206,6 +206,11 @@ def _audio_convert(vid, title):
 
     def _job():
         try:
+            # v1.3.0: "Descargar audio" quiere el archivo COMPLETO: se quita el
+            # ritmo de reproduccion (si no, la descarga se quedaria a medias).
+            _dp = getattr(transcoder, "disable_pace", None)
+            if _dp:
+                _dp(vid)
             transcoder.download_bg(vid, resolver)
             # download_bg es asincrono (v1.3.0): esperar el fin real de la descarga
             waiter = getattr(transcoder, "wait_done", None)
@@ -603,6 +608,9 @@ class Handler(BaseHTTPRequestHandler):
             if vid and e.code in (401, 403, 410):
                 logger.warning("proxy %s en %s; se descarga el audio y se sirve local" % (e.code, vid))
                 try:
+                    _dp = getattr(transcoder, "disable_pace", None)
+                    if _dp:
+                        _dp(vid)          # fallback: hace falta el archivo completo
                     transcoder.download_bg(vid, resolver)
                 except Exception as e2:
                     logger.warning("fallback descarga fallo: %s" % e2)
@@ -693,6 +701,17 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/stop":
                 player.stop()
                 self._send(*json_res({"ok": True, **player.get_state()}))
+            elif path == "/api/position":
+                # v1.3.0: la UI informa donde va la reproduccion; con eso la descarga
+                # solo mantiene "posicion + 5 s" y NO baja el archivo completo.
+                vid = data.get("video_id") or ""
+                if not vid:
+                    with player._lock:
+                        vid = (player.current or {}).get("id") or ""
+                _pos = getattr(transcoder, "position", None)
+                if _pos and vid:
+                    _pos(vid, data.get("t") or 0)
+                self._send(*json_res({"ok": True}))
             elif path == "/api/next":
                 player.next()
                 self._send(*json_res({"ok": True, **player.get_state()}))

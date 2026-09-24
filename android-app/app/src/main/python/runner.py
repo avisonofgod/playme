@@ -17,7 +17,7 @@ import signal
 import threading
 
 
-def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False, cancel=None):
+def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False, cancel=None, pace=None):
     """Ejecuta un comando con kill de grupo en timeout.
 
     - Lanza subprocess.TimeoutExpired si agota `timeout`.
@@ -26,6 +26,9 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
     - v1.3.0: `cancel` (threading.Event) mata el grupo (hijo y nietos) y devuelve
       returncode 1 con .cancelled=True. En Android (in-process) el aborto lo hace
       ytdlp_inproc con un progress hook.
+    - v1.3.0: `pace` (callback) solo lo usa el runner in-process de Android
+      (ytdlp_inproc): pausa la descarga al ritmo de reproduccion. Aqui (subprocess)
+      se acepta y se ignora: el PC descarga completo.
     """
     proc = subprocess.Popen(
         args,

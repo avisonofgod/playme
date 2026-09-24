@@ -36,6 +36,8 @@ os.environ["PORT"] = str(PORT)
 os.environ["PLAYME_NO_FIREFOX"] = "1"
 os.environ["PLAYME_NO_CONVERT"] = "1"
 os.environ["PLAYME_PREFER_FILE"] = "1"
+# v1.3.0: ritmo de descarga (posicion + 5 s) con valores chicos para el test
+os.environ.setdefault("PLAYME_AHEAD_MIN_BYTES", "20480")
 
 import server           # noqa: E402
 from transcoder import Transcoder  # noqa: E402
@@ -63,11 +65,12 @@ class Res:
     def _args(self):
         return []
 
-    def _run(self, args, timeout=None, cancel=None):
+    def _run(self, args, timeout=None, cancel=None, pace=None):
         out = args[args.index("--output") + 1]
         with open(out, "wb") as f:
             f.write(HEAD)
             f.flush()
+            written = len(HEAD)
             left = TOTAL - len(HEAD)
             while left > 0:
                 if cancel is not None and cancel.is_set():
@@ -75,7 +78,12 @@ class Res:
                 n = min(CHUNK, left)
                 f.write(b"a" * n)
                 f.flush()
+                written += n
                 left -= n
+                if pace is not None:
+                    # como yt-dlp: el hook avisa "llevo N bytes" y puede BLOQUEAR
+                    # (pausa de la descarga al ritmo de reproduccion)
+                    pace(written, TOTAL, 240.0)
                 time.sleep(CHUNK_DELAY)
 
         class R:
@@ -259,6 +267,48 @@ borrados = server.transcoder.forget_except(VID4)
 chk("forget_except deja solo el tema actual (%s B borrados)" % borrados, borrados > 0, borrados)
 chk("el otro audio ya no esta en disco", not os.path.isfile(_extra))
 chk("el tema actual sigue intacto tras forget_except", server.transcoder.is_cached(VID4))
+
+# 7) v1.3.0: la descarga SIGUE a la reproduccion (no baja el archivo completo)
+VID7 = "progtest07"
+VID8 = "progtest08"
+_t = server.transcoder
+_t.enable_pace(VID7, duration=240, filesize=TOTAL)
+_t.position(VID7, 0.0)
+stop_adv = threading.Event()
+
+
+def _advance():
+    p = 0.0
+    while not stop_adv.is_set() and p < 600:
+        _t.position(VID7, p)
+        time.sleep(0.5)
+        p += 5.0                       # 5 s de musica cada 0,5 s (playback acelerado)
+
+
+threading.Thread(target=_advance, daemon=True).start()
+_t.download_bg(VID7, server.player.res)
+time.sleep(6)
+s7 = _t.size(VID7)
+_t.cancel(VID7)
+stop_adv.set()
+for _ in range(50):
+    if not _t.is_downloading(VID7):
+        break
+    time.sleep(0.1)
+chk("con ritmo de reproduccion NO baja el archivo completo (%d de %d bytes)" % (s7, TOTAL),
+    s7 < TOTAL * 0.9, s7)
+chk("con ritmo de reproduccion si carga poco a poco (%d bytes)" % s7, s7 > 0, s7)
+chk("POST /api/position mueve la posicion del backend",
+    (post("/api/position", {"video_id": VID7, "t": 42}) or {}).get("ok") is True, "")
+chk("la posicion queda registrada", abs(_t._pos.get(VID7, -1) - 42) < 0.5, _t._pos.get(VID7))
+_t.forget(VID7)
+# sin ritmo (boton Descargar audio) la descarga SI es completa
+_t.download_bg(VID8, server.player.res)
+for _ in range(200):
+    if _t.is_cached(VID8):
+        break
+    time.sleep(0.1)
+chk("sin ritmo (Descargar audio) la descarga es completa", _t.is_cached(VID8), _t.size(VID8))
 
 print("== resultado: %s ==" % ("TODO-OK" if not FAIL else "%d fallos" % len(FAIL)))
 sys.exit(1 if FAIL else 0)

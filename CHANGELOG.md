@@ -5,6 +5,19 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: S
 ## [1.3.0] - 2026-09-24
 
 ### Añadido
+- **Descarga al ritmo de la reproducción (no baja el archivo completo)**: la UI
+  informa la posición (`POST /api/position`, cada ~2 s) y el transcoder pausa la
+  descarga cuando ya tiene `posición + 5 s` de audio (`PLAYME_AHEAD_SECONDS`),
+  con un piso de `PLAYME_AHEAD_MIN_BYTES` (128 KB). El `pace` se aplica dentro
+  del progress hook de yt-dlp (in-process en Android), así que el archivo crece
+  poco a poco mientras suena, en vez de saltar al 100 %. El botón *Descargar
+  audio* pide descarga completa (`disable_pace`). El estado expone `cache_bytes`
+  (los MB que van bajados).
+- **next/prev recorren la lista de resultados**: los botones ⏮/⏭ reproducen el
+  tema anterior/siguiente de la lista visible (`#results`); antes solo miraban
+  la cola interna y, con un solo tema reproducido, no reproducían nada
+  ("Reproduciendo" sin audio). Si el tema actual no está en la lista, siguen
+  usando `/api/next` y `/api/prev`.
 - **Solo el tema actual queda en caché**: al abandonar un tema (play de otro, `next`,
   `prev`, `stop`) su audio se borra del disco con `Transcoder.forget()` (cancela la
   descarga y elimina `<id>.webm`/`.part`), y `forget_except()` deja en caché

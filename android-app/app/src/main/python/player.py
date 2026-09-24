@@ -73,6 +73,15 @@ class Player:
         info = self.res.get_info(video_id)
         if not info:
             info = {"id": video_id, "title": f"YouTube {video_id}", "duration": 0, "uploader": ""}
+        # v1.3.0: la descarga de ESTE tema sigue a la reproduccion (posicion + 5 s):
+        # no se baja el archivo completo.
+        _ep = getattr(self.tr, "enable_pace", None)
+        if _ep:
+            try:
+                _ep(video_id, duration=info.get("duration", 0) or 0,
+                    filesize=(info.get("filesize_approx") or info.get("filesize") or 0))
+            except Exception as e:
+                logger.warning("enable_pace %s: %s" % (video_id, e))
         cache_p = self.tr.path(video_id)
         # En Android conviene el modo "file": YouTube sirve muchos audios por SABR
         # (sin URL directa --get-url) y la descarga siempre funciona; ademas deja

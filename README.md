@@ -321,6 +321,8 @@ logs/                 # playme.log + errors.log
 cd backend && python3 -m unittest discover -s . -p 'test_*.py'
 # suite de la app Android (host; añadir --device con el móvil conectado)
 bash android-app/tests/run-tests.sh [--device]
+# UI real sin navegador (necesita node + jsdom)
+NODE_PATH=/tmp/jtest/node_modules node android-app/tools/linux-only/ui-test.js
 ```
 
 ### Android (app autónoma v1.2.0, HONOR BRP-NX3 / Android 16)

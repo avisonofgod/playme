@@ -191,7 +191,9 @@ function playAudio() {
         b.value = Math.round(audio.currentTime/d*1000)
         if (t) t.textContent = fmtT(audio.currentTime)+" / "+fmtT(d)
       }
+      sendPos()                       // v1.3.0: ritmo de descarga = reproduccion + 5 s
     })
+    audio.addEventListener("seeked", function() { sendPos(true) })
   }
 }
 
@@ -204,7 +206,11 @@ function updateUI() {
     $("npMeta").textContent = (state.current.uploader||"")+" • "+dur(state.current.duration)+extra
     $("npBadge").innerHTML = '<span class="b '+(state.mode==="proxy"?"bproxy":"bfile")+'">'+state.mode+(state.streaming?" · en vivo":"")+"</span>"
     pb.disabled=false; stb.disabled=false; pb.textContent=state.paused?"▶":"⏸"
-    pr.disabled=state.current_index<=0; nx.disabled=false
+    // v1.3.0: next/prev recorren la LISTA de resultados cuando el tema actual
+    // esta en ella (antes se deshabilitaban segun la cola interna)
+    var ids=listIds(), li=ids.indexOf(state.current.id)
+    if (li>=0) { pr.disabled=(li<=0); nx.disabled=(li>=ids.length-1) }
+    else { pr.disabled=state.current_index<=0; nx.disabled=false }
   } else {
     np.classList.remove("active"); pb.disabled=true; stb.disabled=true; pr.disabled=true; nx.disabled=true
     pb.textContent="▶"
@@ -302,28 +308,50 @@ function toggleP() {
   else api("POST","/api/pause",null).then(function(){poll()})
 }
 
-function nextT() {
-  api("POST","/api/next",null).then(function(){
-    api("GET","/api/state").then(function(data) {
-      if (data&&data.ok) {
-        var oid=state.current?state.current.id:null; state=data; updateUI()
-        if (data.playing&&data.current&&data.current.id!==oid) playAudio()
-        else if (!data.playing&&audio) { audio.pause(); audio.src=""; audio.load() }
-      }
-    })
-  })
+// ── v1.3.0: next/prev recorren la LISTA de resultados (no solo la cola) ──
+function listIds() {
+  var rows = document.querySelectorAll("#results .r"), a = []
+  for (var i=0;i<rows.length;i++) a.push(rows[i].dataset.id)
+  return a
 }
 
-function prevT() {
-  api("POST","/api/prev",null).then(function(){
-    api("GET","/api/state").then(function(data) {
-      if (data&&data.ok) {
-        var oid=state.current?state.current.id:null; state=data; updateUI()
-        if (data.playing&&data.current&&data.current.id!==oid) playAudio()
-        else if (!data.playing&&audio) { audio.pause(); audio.src=""; audio.load() }
-      }
+// d=+1 siguiente, d=-1 anterior. Si el tema actual esta en la lista visible,
+// reproduce el vecino de ESA lista (antes solo miraba la cola interna y no
+// reproducia nada); si no, cae al next/prev del backend.
+function stepT(d) {
+  var ids = listIds(), cid = state.current ? state.current.id : null
+  var i = cid ? ids.indexOf(cid) : -1
+  if (i < 0) {                                   // no esta en la lista: cola del backend
+    api("POST", d > 0 ? "/api/next" : "/api/prev", null).then(function(){
+      api("GET","/api/state").then(function(data) {
+        if (data&&data.ok) {
+          var oid=state.current?state.current.id:null; state=data; updateUI()
+          if (data.playing&&data.current&&data.current.id!==oid) playAudio()
+          else if (!data.playing&&audio) { audio.pause(); audio.src=""; audio.load() }
+        }
+      })
     })
-  })
+    return
+  }
+  var j = i + d
+  if (j < 0) { st("Primer tema de la lista","loading"); return }
+  if (j >= ids.length) { st("Ultimo tema de la lista","loading"); return }
+  playV(ids[j])                                  // reproduce el siguiente/anterior de la lista
+}
+
+function nextT() { stepT(1) }
+
+function prevT() { stepT(-1) }
+
+// ── v1.3.0: la UI informa la posicion para que la descarga NO sea completa ──
+// (el backend solo mantiene "posicion + 5 s": carga poco a poco mientras suena)
+var posSent = 0
+function sendPos(force) {
+  if (!audio || !audio.src || !state.current) return
+  var now = Date.now()
+  if (!force && now - posSent < 1800) return
+  posSent = now
+  api("POST","/api/position",{video_id: state.current.id, t: audio.currentTime || 0})
 }
 
 function stopP() {
@@ -402,6 +430,8 @@ function poll() {
       if (offline) { offline = false; st("Listo","success") } // recuperado
       var oid=state.current?state.current.id:null, wp=state.playing
       state=data; updateUI(); syncActiveRows()
+      sendPos()          // v1.3.0: reporta la posicion (aunque este en pausa: asi la
+                         // descarga se queda en "posicion + 5 s" y no baja todo)
       // pausa/reanudacion REALES del <audio> (antes el boton era decorativo)
       if (audio) { if (data.paused && !audio.paused) audio.pause()
                    else if (!data.paused && audio.paused && data.playing) audio.play()["catch"](function(){}) }

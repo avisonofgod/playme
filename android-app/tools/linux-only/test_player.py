@@ -39,6 +39,7 @@ class FakeTranscoder:
         self.cached = set()
         self.cancelled = []      # v1.3.0: ids cuya descarga se corto
         self.forgotten = []      # v1.3.0: ids cuyo cache se borro
+        self.paced = []          # v1.3.0: ids con descarga "sigue a la reproduccion"
 
     def size(self, vid):
         return 0
@@ -67,6 +68,14 @@ class FakeTranscoder:
         for v in leftovers:
             self.cached.discard(v)
         return len(leftovers)
+
+    def enable_pace(self, vid, duration=0, filesize=0):
+        # v1.3.0: descarga al ritmo de la reproduccion (posicion + 5 s)
+        self.paced.append(vid)
+        return True
+
+    def disable_pace(self, vid):
+        return True
 
 
 def make_player(**kwargs):
@@ -148,6 +157,13 @@ class PlayerCoreTest(unittest.TestCase):
         p.res.gate.set()
         self.assertTrue(wait_resolved(p))
         self.assertEqual(p.current["id"], "v2")
+
+    def test_play_activa_ritmo_de_descarga(self):
+        """v1.3.0: el play pide descarga al ritmo de la reproduccion (no completa)."""
+        p = make_player()
+        p.play("v1")
+        wait_resolved(p)
+        self.assertIn("v1", p.tr.paced)
 
     def test_play_otro_tema_borra_cache_del_anterior(self):
         """v1.3.0: al cambiar de tema solo queda en cache el ACTUAL."""

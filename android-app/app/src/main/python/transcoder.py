@@ -11,6 +11,14 @@ from runner import run_command
 logger = logging.getLogger(__name__)
 CACHE = os.environ.get("PLAYME_CACHE_DIR", "/tmp/playme_cache")
 
+# v1.3.0: la descarga sigue a la REPRODUCCION (no baja el archivo completo).
+# Se mantiene en disco/red solo lo que hace falta: posicion + AHEAD_SECONDS.
+AHEAD_SECONDS = float(os.environ.get("PLAYME_AHEAD_SECONDS", "5"))
+AHEAD_MIN_BYTES = int(os.environ.get("PLAYME_AHEAD_MIN_BYTES", "131072"))   # piso ~10 s
+AHEAD_RATE_DEFAULT = float(os.environ.get("PLAYME_AHEAD_RATE", "24000"))    # B/s si no se sabe el bitrate
+PACED_TIMEOUT = float(os.environ.get("PLAYME_PACED_TIMEOUT", "7200"))       # tope de la descarga pausada
+PACE_TICK = float(os.environ.get("PLAYME_PACE_TICK", "0.25"))
+
 
 def _strip_cookies(args):
     """Copia los args de yt-dlp sin el par --cookies <archivo> (el cliente ios
@@ -33,6 +41,89 @@ class Transcoder:
         self._active = {}          # vid -> True mientras la descarga esta en curso
         self._cancel = {}          # vid -> threading.Event de la descarga en curso
         self._active_lock = threading.Lock()
+        self._paced = {}           # vid -> {dur, size, rate}: descarga al ritmo de reproduccion
+        self._pos = {}             # vid -> posicion (seg) que reporta la UI
+        self._pos_t = {}           # vid -> cuando se reporto esa posicion
+
+    # ── ritmo de descarga (v1.3.0) ─────────────────────────────────────────
+    def enable_pace(self, vid, duration=0, filesize=0):
+        """Marca esta descarga como 'sigue a la reproduccion': no baja el archivo
+        completo, solo posicion + PLAYME_AHEAD_SECONDS.
+
+        duration (seg) y filesize (bytes) del tema permiten calcular el bitrate y
+        asi saber cuantos bytes son '5 segundos mas'."""
+        with self._active_lock:
+            self._paced[vid] = {"dur": float(duration or 0), "size": int(filesize or 0),
+                                "rate": 0.0}
+
+    def disable_pace(self, vid):
+        """Descarga completa (p.ej. el boton Descargar audio, que quiere el archivo)."""
+        with self._active_lock:
+            self._paced.pop(vid, None)
+
+    def position(self, vid, seconds):
+        """La UI reporta donde va la reproduccion (segundos). Con esto la descarga
+        se pausa cuando ya hay mas audio del necesario (posicion + 5 s)."""
+        if not vid:
+            return
+        try:
+            s = max(0.0, float(seconds or 0))
+        except (TypeError, ValueError):
+            return
+        with self._active_lock:
+            self._pos[vid] = s
+            self._pos_t[vid] = time.time()
+
+    def is_paced(self, vid):
+        with self._active_lock:
+            return bool(self._paced.get(vid))
+
+    def pace_bytes(self, vid, downloaded=0, total=0, duration=0):
+        """Bytes/segundo de audio (bitrate) para decidir cuanto adelantar."""
+        with self._active_lock:
+            st = self._paced.get(vid) or {}
+            dur = float(duration or st.get("dur") or 0)
+            size = float(total or st.get("size") or 0)
+            r = st.get("rate") or 0.0
+            if size > 0 and dur > 0:
+                r = size / dur
+                if st:
+                    st["rate"] = r
+                    st["dur"] = dur
+        return r or AHEAD_RATE_DEFAULT
+
+    def _pace_for(self, vid):
+        """Callback del progress hook de yt-dlp: BLOQUEA (pausa la descarga)
+        mientras lo descargado pase de posicion + AHEAD_SECONDS.
+
+        Si la UI no reporta posicion (o dejo de reportarla) devuelve de inmediato:
+        se mantiene el comportamiento anterior (descarga completa)."""
+        logged = {"v": False}
+
+        def _fn(downloaded, total=0, duration=0):
+            while True:
+                with self._active_lock:
+                    paced = self._paced.get(vid)
+                    pos = self._pos.get(vid, 0.0)
+                    seen = self._pos_t.get(vid)
+                    ev = self._cancel.get(vid)
+                if not paced:
+                    return                            # descarga completa pedida (Descargar)
+                if ev is not None and ev.is_set():
+                    return
+                if not seen or (time.time() - seen) > 30.0:
+                    return                            # sin datos de la UI: descarga normal
+                rate = self.pace_bytes(vid, downloaded, total, duration)
+                limit = pos * rate + max(AHEAD_MIN_BYTES, AHEAD_SECONDS * rate)
+                if (downloaded or 0) <= limit:
+                    return
+                if not logged["v"]:
+                    logged["v"] = True
+                    logger.info("descarga al ritmo de la reproduccion: %s pausa en %d bytes "
+                                "(posicion %.0fs, %.0f B/s de audio)"
+                                % (vid, downloaded or 0, pos, rate))
+                time.sleep(PACE_TICK)
+        return _fn
 
     def path(self, vid):
         return os.path.join(CACHE, f"{vid}.webm")
@@ -220,6 +311,10 @@ class Transcoder:
             return
         ev = self._cancel_event(vid)
         part = self._part(vid)
+        # v1.3.0: si la descarga sigue a la reproduccion, el timeout es largo (puede
+        # durar toda la cancion) y el progreso lo marca el hook con `pace`.
+        pace = self._pace_for(vid) if self.is_paced(vid) else None
+        tmo = PACED_TIMEOUT if pace else 180.0
         args = resolver._args()
         base = [
             "--format", "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
@@ -243,7 +338,7 @@ class Transcoder:
                     cancelled = True
                     break
                 a2 = base_args + (["--extractor-args", client] if client else []) + base
-                res = resolver._run(a2, timeout=180, cancel=ev)
+                res = resolver._run(a2, timeout=tmo, cancel=ev, pace=pace)
                 rc = getattr(res, "returncode", 0)
                 if getattr(res, "cancelled", False) or ev.is_set():
                     cancelled = True
@@ -257,6 +352,12 @@ class Transcoder:
             if cancelled:
                 logger.info("descarga cortada: %s" % vid)
             elif os.path.isfile(part) and os.path.getsize(part) > 0:
+                if pace is not None and rc == 124:
+                    # ritmo de reproduccion: se acabo el tiempo con la descarga
+                    # pausada; se conserva lo bajado (el audio sigue sonando)
+                    logger.info("descarga pausada al ritmo de reproduccion: %s (%d bytes)"
+                                % (vid, os.path.getsize(part)))
+                    return
                 os.rename(part, self.path(vid))
                 logger.info(f"cache ok: {vid} ({self.size(vid)} bytes)")
                 return

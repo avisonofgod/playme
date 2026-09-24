@@ -42,8 +42,9 @@ def _strip_prefix(args):
     return [str(x) for x in a]
 
 
-def _api_download(argv, cancel, err, holder):
-    """Descarga con la API para poder ABORTARLA (progress hook -> DownloadCancelled).
+def _api_download(argv, cancel, err, holder, pace=None):
+    """Descarga con la API para poder ABORTARLA (progress hook -> DownloadCancelled)
+    y/o PAUSARLA al ritmo de reproduccion (`pace`).
 
     Devuelve el returncode como yt_dlp.main()."""
     import yt_dlp
@@ -56,6 +57,13 @@ def _api_download(argv, cancel, err, holder):
     def _ph(_status):
         if cancel is not None and cancel.is_set():
             raise DownloadCancelled("cancelado por el usuario")
+        if pace is not None:
+            inf = _status.get("info_dict") or {}
+            # v1.3.0: bloquea aqui (pausa real de la descarga) si ya hay mas audio
+            # del que hace falta para la posicion actual de reproduccion
+            pace(_status.get("downloaded_bytes") or 0,
+                 _status.get("total_bytes") or _status.get("total_bytes_estimate") or 0,
+                 inf.get("duration") or 0)
 
     hooks.append(_ph)
     ydl_opts["progress_hooks"] = hooks
@@ -72,7 +80,7 @@ def _api_download(argv, cancel, err, holder):
     return int(ret) if ret else 0
 
 
-def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False, cancel=None):
+def run_command(args, timeout=None, check=False, capture_output=True, stderr=None, text=False, cancel=None, pace=None):
     import yt_dlp
 
     argv = _strip_prefix(args)
@@ -92,11 +100,11 @@ def run_command(args, timeout=None, check=False, capture_output=True, stderr=Non
     def _job():
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                if cancel is None:
+                if cancel is None and pace is None:
                     r = yt_dlp.main(argv)
                     holder["code"] = r if isinstance(r, int) else 0
                 else:
-                    holder["code"] = _api_download(argv, cancel, err, holder)
+                    holder["code"] = _api_download(argv, cancel, err, holder, pace=pace)
         except SystemExit as e:  # yt-dlp sale con sys.exit
             holder["code"] = e.code if isinstance(e.code, int) else 0
         except BaseException as e:  # nunca tumbar el server por un fallo de yt-dlp
