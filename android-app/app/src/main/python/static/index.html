@@ -71,7 +71,6 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 </head>
 <body>
 <h1>♫ Riveros Playme <span style="font-size:0.55em;color:#889;font-weight:400">v1.3.0</span></h1>
-<div id="conn" style="text-align:center;font-size:0.72em;color:#889;margin:-10px 0 10px">Conectado por usb</div>
 <div id="tabs">
 <button id="tabPlay" class="active">🎵 Reproducir</button>
 <button id="tabQueue">🗂 Cola</button>
@@ -439,14 +438,7 @@ document.addEventListener("keydown",function(e) {
   if (e.code==="Enter"&&document.activeElement===$("q")&&!e.repeat){e.preventDefault();debouncedSearch()}
 })
 
-document.addEventListener("DOMContentLoaded",function(){startPolling();poll();connLabel()})
-// v1.3.0: la app se maneja desde el movil (WebView) o desde el PC por adb forward
-// (USB). El PC se distingue por el User-Agent.
-function connLabel() {
-  var el = $("conn"); if (!el) return
-  var ua = navigator.userAgent || ""
-  el.textContent = /Android/i.test(ua) ? "Conectado en el móvil" : "Conectado por usb"
-}
+document.addEventListener("DOMContentLoaded",function(){startPolling();poll()})
 </script>
 </body>
 </html>

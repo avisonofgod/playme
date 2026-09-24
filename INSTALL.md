@@ -225,3 +225,5 @@ APK que corre PlayMe dentro del movil (Python 3.11 + yt-dlp con Chaquopy), sin P
 Compilar: `cd android-app && ./gradlew assembleRelease` con
 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`, `ANDROID_HOME=/opt/android-sdk`,
 `GRADLE_USER_HOME=/home/.gradle`. Suite: `bash android-app/tests/run-tests.sh [--device]`.
+Si el build falla con "SDK location not found" (local.properties no se versiona):
+`echo sdk.dir=/opt/android-sdk > android-app/local.properties`.
