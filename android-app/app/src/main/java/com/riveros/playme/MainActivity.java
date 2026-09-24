@@ -1,6 +1,7 @@
 package com.riveros.playme;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Intent;
 import android.net.Uri;
@@ -10,7 +11,9 @@ import android.os.Environment;
 import android.util.Log;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JsResult;
 import android.webkit.URLUtil;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -32,6 +35,7 @@ public class MainActivity extends Activity {
     static final String TAG = "PlayMeLocal";
     static final int PORT = 8191;
     static final int REQ_COOKIES = 1001;
+    static final String APP_LABEL = "Riveros Playme v1.3.0";
 
     WebView web;
     TextView status;
@@ -88,7 +92,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView v, String url) {
                 if (!loginMode && url != null && url.contains("127.0.0.1:" + PORT)) {
-                    status.setText("PlayMe local activo (" + (hasCookie() ? "con cookie" : "sin cookie") + ")");
+                    status.setText(APP_LABEL + " · activo (" + (hasCookie() ? "con cookie" : "sin cookie") + ")");
                 }
             }
 
@@ -103,6 +107,31 @@ public class MainActivity extends Activity {
                 } else if (!loginMode) {
                     status.setText("No responde el servidor local");
                 }
+            }
+        });
+
+        // v1.3.0: sin WebChromeClient los dialogos JS del WebView no se muestran y
+        // confirm() devuelve false -> "Vaciar descargas" no hacia nada.
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onJsAlert(WebView v, String url, String msg, final JsResult r) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(msg)
+                        .setPositiveButton("OK", (d, w) -> r.confirm())
+                        .setCancelable(false)
+                        .show();
+                return true;
+            }
+
+            @Override
+            public boolean onJsConfirm(WebView v, String url, String msg, final JsResult r) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setMessage(msg)
+                        .setPositiveButton("Sí", (d, w) -> r.confirm())
+                        .setNegativeButton("No", (d, w) -> r.cancel())
+                        .setCancelable(false)
+                        .show();
+                return true;
             }
         });
 
@@ -130,7 +159,7 @@ public class MainActivity extends Activity {
             arrancar();
         });
 
-        status.setText("Iniciando PlayMe local...");
+        status.setText(APP_LABEL + " — iniciando...");
 
         // Android 13+: el permiso de notificaciones se pide DESPUES de arrancar
         // (pedirlo dentro de onCreate dejaba la app sin arrancar en MagicOS)
@@ -174,7 +203,7 @@ public class MainActivity extends Activity {
         } catch (Throwable e) {
             Log.w(TAG, "servicio en primer plano no arrancado", e);
         }
-        status.setText("Iniciando PlayMe local...");
+        status.setText(APP_LABEL + " — iniciando...");
         new Thread(() -> {
             try {
                 if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
@@ -185,7 +214,8 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> {
                     if (ok) {
                         retries = 0;
-                        status.setText(hasCookie() ? "PlayMe local activo (con cookie)" : "YouTube publico OK - importa cookies para mixes");
+                        status.setText(hasCookie() ? (APP_LABEL + " · activo (con cookie)")
+                                : (APP_LABEL + " · activo, YouTube publico OK - importa cookies para mixes"));
                         web.loadUrl(localUrl());
                     } else {
                         status.setText("Python arranco pero el puerto no respondio");

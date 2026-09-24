@@ -207,6 +207,10 @@ def _audio_convert(vid, title):
     def _job():
         try:
             transcoder.download_bg(vid, resolver)
+            # download_bg es asincrono (v1.3.0): esperar el fin real de la descarga
+            waiter = getattr(transcoder, "wait_done", None)
+            if waiter:
+                waiter(vid, timeout=600.0)
             r = "ready" if transcoder.is_cached(vid) else "error"
         except Exception as e:
             logger.warning("audio dl fail %s: %s" % (vid, e)); r = "error"
@@ -446,8 +450,24 @@ class Handler(BaseHTTPRequestHandler):
             mode = player.mode
             surl = player.stream_url
             cpath = player.cache_path
-        if mode == "file" and cpath and os.path.exists(cpath):
-            self._serve_file(cpath)
+        if mode == "file":
+            vid = player.current.get("id") if player.current else ""
+            path = None
+            getp = getattr(transcoder, "available_path", None)
+            if getp and vid:
+                try:
+                    path = getp(vid)
+                except Exception:
+                    path = None
+            if not path and cpath and os.path.exists(cpath):
+                path = cpath
+            if not path:
+                self._send(*err_res("No stream", 404)); return
+            # Completo -> Range/206 (seek). En curso -> progresivo (suena ya, v1.3.0).
+            if transcoder.is_cached(vid):
+                self._serve_file(path)
+            else:
+                self._serve_growing(path, vid)
         elif mode == "proxy":
             vid = player.current.get("id") if player.current else ""
             # Si ya hay URL resuelta (googlevideo) usamos _proxy(): respeta el
@@ -494,6 +514,47 @@ class Handler(BaseHTTPRequestHandler):
                     if not c: break
                     self.wfile.write(c); left -= len(c)
         except (BrokenPipeError, ConnectionResetError): pass
+
+    def _serve_growing(self, path, vid):
+        """v1.3.0: sirve el audio MIENTRAS se descarga.
+
+        Sin Content-Length (HTTP/1.0 cierra al terminar): el <audio> lo trata
+        como flujo y empieza con los primeros KB en vez de esperar al 100%.
+        Al completarse la descarga el servidor termina la respuesta.
+        """
+        stale = float(os.environ.get("PLAYME_STREAM_STALE", "90"))
+        ctype = "audio/webm"
+        try:
+            with open(path, "rb") as f:
+                head = f.read(12)
+            if len(head) >= 8 and head[4:8] == b"ftyp":
+                ctype = "audio/mp4"
+        except OSError:
+            head = b""
+        # el .part existe: si es m4a el moov va al inicio, no hay que esperar mas
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Accept-Ranges", "none")
+        self.end_headers()
+        last = time.time()
+        sent = 0
+        try:
+            with open(path, "rb") as f:
+                while True:
+                    c = f.read(65536)
+                    if c:
+                        self.wfile.write(c); sent += len(c); last = time.time(); continue
+                    if transcoder.is_cached(vid) or not transcoder.is_downloading(vid):
+                        break
+                    if time.time() - last > stale:
+                        logger.warning("stream progresivo: descarga estancada (%s, %s bytes)" % (vid, sent))
+                        break
+                    time.sleep(0.2)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except OSError as e:
+            logger.warning("stream progresivo %s: %s" % (vid, e))
 
     def _proxy(self, url, vid=None):
         """Proxy de streaming. Envia headers de navegador + cookies para que

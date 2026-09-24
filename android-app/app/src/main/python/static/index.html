@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PlayMe</title>
+<title>Riveros Playme</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:sans-serif;background:#0d0d0d;color:#e0e0e0;padding:20px;max-width:600px;margin:auto}
@@ -70,7 +70,8 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 </style>
 </head>
 <body>
-<h1>♫ PlayMe</h1>
+<h1>♫ Riveros Playme <span style="font-size:0.55em;color:#889;font-weight:400">v1.3.0</span></h1>
+<div id="conn" style="text-align:center;font-size:0.72em;color:#889;margin:-10px 0 10px">Conectado por usb</div>
 <div id="tabs">
 <button id="tabPlay" class="active">🎵 Reproducir</button>
 <button id="tabQueue">🗂 Cola</button>
@@ -112,10 +113,19 @@ button.g,#searchBtn.g,.r button.g,.qd.g,.dl-ok.g{color:#fff!important;border-col
 <div id="dlList" class="ruleta"><div class="rm" style="padding:8px">Sin descargas</div></div>
 </div>
 
+<!-- confirmacion propia: el confirm() del WebView puede no estar implementado (v1.3.0) -->
+<div id="cfm" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:99;align-items:center;justify-content:center">
+<div style="background:#1a1a2e;border:1px solid #333;border-radius:10px;padding:16px;max-width:320px;text-align:center">
+<div id="cfmMsg" style="margin-bottom:12px;font-size:0.9em"></div>
+<button id="cfmYes" style="background:#e94560;color:#fff;margin-right:8px">Sí</button>
+<button id="cfmNo" style="background:#2a2a3e;color:#ccc">No</button>
+</div>
+</div>
+
 <script>
 var state = {}
 function fmtT(s){ s=Math.floor(s||0); return Math.floor(s/60)+":"+("0"+(s%60)).slice(-2) }
-function bindSeek(){ var b=$("pbar"); if(!b) return; b.onchange=function(){ if(audio&&audio.duration&&isFinite(audio.duration)) audio.currentTime=audio.duration*this.value/1000 } }
+function bindSeek(){ var b=$("pbar"); if(!b) return; b.onchange=function(){ var d=uiDur(); if(audio&&d>0) audio.currentTime=d*this.value/1000 } }
 document.addEventListener("DOMContentLoaded", bindSeek)
 var audio = null
 var pt = null
@@ -126,6 +136,25 @@ function $(id) { return document.getElementById(id) }
 function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML }
 function dur(sec) { if (!sec || sec <= 0) return "?:??"; var m = Math.floor(sec/60), n = Math.floor(sec%60); return m + ":" + (n<10?"0":"") + n }
 function flash(btn) { if (!btn || !btn.classList) return; btn.classList.add("g"); setTimeout(function(){ btn.classList.remove("g") }, 600) }
+// v1.3.0: en el WebView de la app window.confirm() puede devolver false sin mostrar
+// nada (sin WebChromeClient) -> el boton "Vaciar descargas" no hacia nada.
+function askConfirm(msg, cb) {
+  var m = $("cfm"), y = $("cfmYes"), n = $("cfmNo")
+  if (!m || !y || !n) { cb(true); return }
+  $("cfmMsg").textContent = msg
+  m.style.display = "flex"
+  function done(ok) {
+    m.style.display = "none"; y.onclick = null; n.onclick = null; cb(ok)
+  }
+  y.onclick = function() { done(true) }
+  n.onclick = function() { done(false) }
+}
+// duracion para la barra: la del <audio> o, si aun se esta descargando (stream
+// progresivo), la conocida por el backend
+function uiDur() {
+  if (audio && audio.duration && isFinite(audio.duration)) return audio.duration
+  return (state.current && state.current.duration) ? state.current.duration : 0
+}
 function syncActiveRows() {
   var rows = document.querySelectorAll("#results .r"), cid = state.current ? state.current.id : null
   for (var i=0;i<rows.length;i++) { if (rows[i].dataset.id === cid) rows[i].classList.add("active"); else rows[i].classList.remove("active") }
@@ -158,10 +187,10 @@ function playAudio() {
     audio.src = "/api/stream?_=" + Date.now(); audio.load()
     audio.play()["catch"](function(e) { if (e.name !== "AbortError") st("Error: "+e.message, "error") })
     audio.addEventListener("timeupdate", function() {
-      var b=$("pbar"), t=$("ptime")
-      if (b && audio.duration && isFinite(audio.duration)) {
-        b.value = Math.round(audio.currentTime/audio.duration*1000)
-        if (t) t.textContent = fmtT(audio.currentTime)+" / "+fmtT(audio.duration)
+      var b=$("pbar"), t=$("ptime"), d=uiDur()
+      if (b && d > 0) {
+        b.value = Math.round(audio.currentTime/d*1000)
+        if (t) t.textContent = fmtT(audio.currentTime)+" / "+fmtT(d)
       }
     })
   }
@@ -172,8 +201,9 @@ function updateUI() {
   if (state.playing && state.current) {
     np.classList.add("active")
     $("npTitle").textContent = state.current.title
-    $("npMeta").textContent = (state.current.uploader||"")+" • "+dur(state.current.duration)
-    $("npBadge").innerHTML = '<span class="b '+(state.mode==="proxy"?"bproxy":"bfile")+'">'+state.mode+"</span>"
+    var extra = state.streaming ? (" • descargando " + Math.round((state.cache_bytes||0)/1048576) + " MB") : ""
+    $("npMeta").textContent = (state.current.uploader||"")+" • "+dur(state.current.duration)+extra
+    $("npBadge").innerHTML = '<span class="b '+(state.mode==="proxy"?"bproxy":"bfile")+'">'+state.mode+(state.streaming?" · en vivo":"")+"</span>"
     pb.disabled=false; stb.disabled=false; pb.textContent=state.paused?"▶":"⏸"
     pr.disabled=state.current_index<=0; nx.disabled=false
   } else {
@@ -314,14 +344,18 @@ function pollDl() {
 }
 
 function cleanDl() {
-  if (!confirm("Eliminar todas las descargas?")) return
-  api("POST","/api/clean/dl",{}).then(function(data) {
-    if (data && data.ok) {
-      pollDl()
-      st("Descargas eliminadas","success")
-    } else {
-      st("Error al limpiar","error")
-    }
+  // v1.3.0: modal propio (confirm() del WebView no funcionaba -> el boton no hacia nada)
+  askConfirm("Eliminar todas las descargas?", function(ok) {
+    if (!ok) return
+    api("POST","/api/clean/dl",{}).then(function(data) {
+      if (data && data.ok) {
+        renderDl({})
+        pollDl()
+        st("Descargas eliminadas","success")
+      } else {
+        st("Error al limpiar","error")
+      }
+    })
   })
 }
 
@@ -405,7 +439,14 @@ document.addEventListener("keydown",function(e) {
   if (e.code==="Enter"&&document.activeElement===$("q")&&!e.repeat){e.preventDefault();debouncedSearch()}
 })
 
-document.addEventListener("DOMContentLoaded",function(){startPolling();poll()})
+document.addEventListener("DOMContentLoaded",function(){startPolling();poll();connLabel()})
+// v1.3.0: la app se maneja desde el movil (WebView) o desde el PC por adb forward
+// (USB). El PC se distingue por el User-Agent.
+function connLabel() {
+  var el = $("conn"); if (!el) return
+  var ua = navigator.userAgent || ""
+  el.textContent = /Android/i.test(ua) ? "Conectado en el móvil" : "Conectado por usb"
+}
 </script>
 </body>
 </html>

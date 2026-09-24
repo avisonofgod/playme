@@ -36,6 +36,12 @@ class Player:
         # el stat va FUERA del lock: /api/state se consulta cada 2 s y no debe
         # bloquear play/pausa/next/stream
         s["cache_bytes"] = self.tr.size(cur) if cur else 0
+        # v1.3.0: modo file mientras el archivo aun se esta bajando -> el UI indica
+        # "en vivo" y usa la duracion conocida para la barra.
+        try:
+            s["streaming"] = bool(cur and s.get("mode") == "file" and not self.tr.is_cached(cur))
+        except Exception:
+            s["streaming"] = False
         return s
 
     def _resolve_and_set(self, video_id):
@@ -45,13 +51,33 @@ class Player:
         cache_p = self.tr.path(video_id)
         # En Android conviene el modo "file": YouTube sirve muchos audios por SABR
         # (sin URL directa --get-url) y la descarga siempre funciona; ademas deja
-        # el audio en cache (offline). Se salta el sondeo de estrategias de URL.
+        # el audio en cache (offline).
+        # v1.3.0: la descarga arranca en background y se reproduce con los PRIMEROS
+        # KB (antes download_bg bloqueaba y el audio sonaba solo al 100%).
         if not self.tr.is_cached(video_id) and os.environ.get("PLAYME_PREFER_FILE") == "1":
             logger.info("modo file: descargando audio de %s" % video_id)
             self.tr.download_bg(video_id, self.res)
-        if self.tr.is_cached(video_id):
+            waiter = getattr(self.tr, "wait_partial", None)
+            if waiter:
+                try:
+                    waiter(video_id,
+                           timeout=float(os.environ.get("PLAYME_PARTIAL_WAIT", "25")),
+                           min_bytes=int(os.environ.get("PLAYME_PARTIAL_MIN_BYTES", "262144")))
+                except Exception as e:
+                    logger.warning("wait_partial %s: %s" % (video_id, e))
+        avail = cache_p if self.tr.is_cached(video_id) else None
+        if avail is None:
+            getp = getattr(self.tr, "available_path", None)
+            if getp:
+                try:
+                    avail = getp(video_id)
+                except Exception as e:
+                    logger.warning("available_path %s: %s" % (video_id, e))
+                    avail = None
+        if avail:
             mode = "file"
             surl = None
+            cache_p = avail
         else:
             surl = self.res.get_stream_url(video_id)
             if not surl:
@@ -59,12 +85,19 @@ class Player:
                 # se descarga el audio al cache y se reproduce en modo "file".
                 logger.warning("sin URL directa (%s); se descarga el audio" % (self.res.last_error or "?"))
                 self.tr.download_bg(video_id, self.res)
+                waiter = getattr(self.tr, "wait_done", None)
+                if waiter:
+                    try:
+                        waiter(video_id, timeout=180.0)
+                    except Exception as e:
+                        logger.warning("wait_done %s: %s" % (video_id, e))
                 if not self.tr.is_cached(video_id):
                     self.last_error = self.res.last_error or f"no stream for {video_id}"
                     logger.error(f"no stream for {video_id}: {self.last_error}")
                     return False
                 mode = "file"
                 surl = None
+                cache_p = self.tr.path(video_id)
             else:
                 mode = "proxy"
                 if os.environ.get("PLAYME_NO_BG_DOWNLOAD") != "1":

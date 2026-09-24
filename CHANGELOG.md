@@ -2,6 +2,27 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es/1.1.0/). Versionado: SemVer.
 
+## [1.3.0] - 2026-09-24
+
+### Añadido
+- **Reproducción en vivo (stream progresivo)**: el audio empieza a sonar con los
+  primeros ~256 KB (~5 s) en vez de esperar al 100% de la descarga. `download_bg()`
+  ya no bloquea (arranca en background y es idempotente), `wait_partial()` espera los
+  primeros bytes y `GET /api/stream` sirve el `.part` mientras crece (sin
+  `Content-Length`); al completarse la descarga queda el archivo en caché y el stream
+  pasa a responder 206 con Range (seek). Variables: `PLAYME_PARTIAL_WAIT` (25 s),
+  `PLAYME_PARTIAL_MIN_BYTES` (262144), `PLAYME_STREAM_STALE` (90 s).
+- Estado `streaming` en `/api/state`; la UI muestra la insignia `file · en vivo`,
+  los MB descargados y usa la duración conocida para la barra de progreso.
+
+### Corregido
+- **Botón "Vaciar descargas"**: no hacía nada porque `window.confirm()` en el WebView
+  no está implementado (sin `WebChromeClient` devuelve `false`) y `cleanDl()` salía
+  antes de llamar al API. Ahora usa un modal propio (`askConfirm`) y, además, la app
+  implementa `onJsConfirm`/`onJsAlert` con `AlertDialog`.
+- `_audio_convert()` (cola de Descargas) esperaba el fin de `download_bg()` de forma
+  implícita; ahora usa `wait_done()` explícito tras hacerlo asíncrono.
+
 ## [1.2.1] - 2026-09-15
 
 ### Corregido

@@ -93,14 +93,17 @@ for i in $(seq 1 20); do
 done
 C=000
 for i in $(seq 1 12); do
+  # v1.3.0: con el archivo aun descargando el stream es progresivo (200, sin
+  # Content-Length); ya completo responde 206 con Range.
   C=$(curl -s -m 60 -o /dev/null -w '%{http_code}' -r 0-65535 "http://127.0.0.1:$PORT/api/stream")
-  [ "$C" = "206" ] && break
+  { [ "$C" = "206" ] || [ "$C" = "200" ]; } && break
   sleep 6
 done
-if [ "$C" = "206" ]; then chk "stream HTTP 206" 1
+if [ "$C" = "206" ]; then chk "stream HTTP 206 (completo/seek)" 1
+elif [ "$C" = "200" ]; then chk "stream progresivo HTTP 200 (en vivo)" 1
 elif grep -qiE 'po_token|SABR|page needs to be reloaded' "$SIM/boot.log" 2>/dev/null; then
-  echo "SKIP stream HTTP 206 (limite de YouTube: PO token/SABR, no es del codigo)"
-else bad "stream HTTP 206 (got $C)"; fi
+  echo "SKIP stream (limite de YouTube: PO token/SABR, no es del codigo)"
+else bad "stream HTTP 200/206 (got $C)"; fi
 # descarga de audio original (Android sin ffmpeg)
 curl -s -m 30 -X POST "http://127.0.0.1:$PORT/api/convert" -H 'Content-Type: application/json' -d '{"video_id":"dQw4w9WgXcQ","title":"t"}' >/dev/null
 for i in $(seq 1 40); do
@@ -121,6 +124,19 @@ grep -q 'player_client=ios' transcoder.py && chk "transcoder usa el cliente ios"
 grep -q '_strip_cookies' transcoder.py && chk "descarga sin cookies (ios no las soporta)" 1 || bad "descarga sin cookies"
 grep -q 'cache_dir=None' playme_boot.py && chk "arranque con cache del sistema" 1 || bad "arranque con cache del sistema"
 ! grep -q 'print(' dns_java.py && chk "sin print en dns_java (no corrompe el JSON)" 1 || bad "sin print en dns_java"
+
+# 3c) v1.3.0 (sin red)
+grep -q 'def wait_partial' transcoder.py && chk "transcoder: arranque con los primeros KB" 1 || bad "transcoder: wait_partial"
+grep -q 'def _serve_growing' server.py && chk "server: stream progresivo (sin esperar el 100%)" 1 || bad "server: _serve_growing"
+grep -q 'def is_downloading' transcoder.py && chk "descarga en background no bloqueante" 1 || bad "is_downloading"
+grep -q 'askConfirm' static/index.html && chk "UI: confirm propio (Vaciar descargas)" 1 || bad "UI: askConfirm"
+! grep -q 'if (!confirm(' static/index.html && chk "UI: sin window.confirm (WebView)" 1 || bad "UI: sigue usando confirm()"
+grep -q 'WebChromeClient' "$REPO/android-app/app/src/main/java/com/riveros/playme/MainActivity.java" && chk "app: dialogos JS (onJsConfirm) en el WebView" 1 || bad "app: WebChromeClient"
+grep -q 'versionName = "1.3.0"' "$REPO/android-app/app/build.gradle.kts" && chk "version 1.3.0" 1 || bad "version 1.3.0"
+# progresivo + limpieza de Descargas (mock de descarga, sin red)
+python3 "$REPO/android-app/tools/linux-only/test_progresivo.py" > "$SIM/prog.log" 2>&1 \
+  && chk "reproduccion progresiva + clean/dl (test_progresivo)" 1 \
+  || { bad "reproduccion progresiva + clean/dl"; tail -12 "$SIM/prog.log"; }
 
 # 4) Dispositivo (opcional)
 if [ "${1:-}" = "--device" ]; then

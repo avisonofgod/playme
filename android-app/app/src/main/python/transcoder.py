@@ -30,6 +30,8 @@ class Transcoder:
     def __init__(self, runner=None):
         self._runner = runner or run_command
         os.makedirs(CACHE, exist_ok=True)
+        self._active = {}          # vid -> True mientras la descarga esta en curso
+        self._active_lock = threading.Lock()
 
     def path(self, vid):
         return os.path.join(CACHE, f"{vid}.webm")
@@ -41,12 +43,92 @@ class Transcoder:
         p = self.path(vid)
         return os.path.isfile(p) and os.path.getsize(p) > 0
 
-    def size(self, vid):
+    def part_path(self, vid):
+        return self._part(vid)
+
+    def available_path(self, vid):
+        """Archivo COMPLETO si existe; si no, el .part con datos (reproduccion
+        progresiva: v1.3.0 permite empezar a sonar antes del 100%)."""
         p = self.path(vid)
-        return os.path.getsize(p) if os.path.isfile(p) else 0
+        if os.path.isfile(p) and os.path.getsize(p) > 0:
+            return p
+        pp = self._part(vid)
+        if os.path.isfile(pp) and os.path.getsize(pp) > 0:
+            return pp
+        return None
+
+    def is_downloading(self, vid):
+        with self._active_lock:
+            return bool(self._active.get(vid))
+
+    def size(self, vid):
+        """Bytes disponibles ya (final o .part en curso)."""
+        for p in (self.path(vid), self._part(vid)):
+            if os.path.isfile(p):
+                try:
+                    n = os.path.getsize(p)
+                except OSError:
+                    n = 0
+                if n > 0:
+                    return n
+        return 0
+
+    def wait_partial(self, vid, timeout=25.0, min_bytes=262144):
+        """Espera los PRIMEROS bytes del audio (o el final de la descarga).
+
+        v1.3.0: el play ya no espera al 100%; con ~256 KB (unos segundos de
+        audio) el <audio> puede empezar y el resto llega mientras suena."""
+        end = time.time() + max(0.0, timeout)
+        while True:
+            p = self.available_path(vid)
+            if self.is_cached(vid):
+                return self.path(vid)
+            try:
+                ok = p and os.path.getsize(p) >= min_bytes
+            except OSError:
+                ok = False
+            if ok:
+                return p
+            if not self.is_downloading(vid):
+                return p
+            if time.time() >= end:
+                return p
+            time.sleep(0.2)
+
+    def wait_done(self, vid, timeout=600.0):
+        """Espera a que la descarga termine (usado por la cola de Descargas)."""
+        end = time.time() + max(0.0, timeout)
+        while True:
+            if self.is_cached(vid):
+                return True
+            if not self.is_downloading(vid):
+                return self.is_cached(vid)
+            if time.time() >= end:
+                return self.is_cached(vid)
+            time.sleep(0.3)
 
     def download_bg(self, vid, resolver):
-        """Descarga en background a .part y renombra a final al completar.
+        """Arranca la descarga en background y RETORNA YA (idempotente).
+
+        Antes bloqueaba hasta el 100%: con PLAYME_PREFER_FILE el play no
+        empezaba hasta que el archivo estaba completo (v1.2.x)."""
+        if self.is_cached(vid):
+            return
+        with self._active_lock:
+            if self._active.get(vid):
+                return
+            self._active[vid] = True
+        threading.Thread(target=self._download_worker, args=(vid, resolver), daemon=True).start()
+
+    def _download_worker(self, vid, resolver):
+        try:
+            self._download_sync(vid, resolver)
+        finally:
+            with self._active_lock:
+                self._active.pop(vid, None)
+
+    def _download_sync(self, vid, resolver):
+        """Descarga a .part y renombra a final al completar.
         Asi, un archivo parcial (descarga abortada) NO se marca como cached."""
         if self.is_cached(vid):
             return
